@@ -87,6 +87,7 @@ function showScreen(name) {
     stopCamera();
     stopFeedRefresh();
     stopRealtimeFeed();
+    focusNameInput();
   }
 }
 
@@ -98,6 +99,15 @@ function setStatus(id, message, error = false) {
 
 function updateNameButton() {
   $("nameNext").disabled = !$("nameInput").value.trim();
+}
+
+function focusNameInput() {
+  if (!screens.name.classList.contains("is-active")) return;
+  const input = $("nameInput");
+  window.requestAnimationFrame(() => {
+    input.focus({ preventScroll: true });
+    window.setTimeout(() => input.focus({ preventScroll: true }), 180);
+  });
 }
 
 function updateDisplayName() {
@@ -1086,9 +1096,13 @@ function bindGesturePlayback() {
     claimStationPlayback({ silent: true });
   });
   window.addEventListener("pageshow", () => {
-    loadFeed({ keepTrack: true });
-    startRealtimeFeed();
-    claimStationPlayback({ silent: true });
+    if (screens.create.classList.contains("is-active")) {
+      loadFeed({ keepTrack: true });
+      startRealtimeFeed();
+      claimStationPlayback({ silent: true });
+    } else {
+      focusNameInput();
+    }
   });
 }
 
@@ -1129,6 +1143,8 @@ function bindEvents() {
       loadFeed({ keepTrack: true });
       if (!document.hidden) startRealtimeFeed();
       claimStationPlayback({ silent: true, force: true });
+    } else if (!document.hidden) {
+      focusNameInput();
     }
   });
 
@@ -1145,4 +1161,6 @@ renderTrack();
 
 if (profile.name) {
   showScreen("create");
+} else {
+  focusNameInput();
 }

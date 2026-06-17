@@ -15,24 +15,17 @@
     <title>Phonefriends</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=15" />
+    <link rel="stylesheet" href="/styles.css?v=16" />
   </head>
   <body>
     <section class="screen is-active" id="nameScreen" aria-labelledby="nameTitle">
       <main class="entry-panel">
-        <div class="mark" aria-hidden="true">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
-        <p class="eyebrow">Phonefriends</p>
-        <h1 id="nameTitle">Pick a name</h1>
+        <h1 id="nameTitle">phonefriends</h1>
         <form class="name-form" id="nameForm">
-          <label class="field-label" for="nameInput">Username</label>
           <div class="text-field">
-            <input id="nameInput" name="name" autocomplete="nickname" autocapitalize="words" maxlength="28" placeholder="Your name" />
+            <input id="nameInput" name="name" autocomplete="nickname" autocapitalize="words" maxlength="28" placeholder="Your name" aria-label="Your name" autofocus />
           </div>
-          <button class="primary-button" id="nameNext" type="submit" disabled>Next</button>
+          <button class="primary-button" id="nameNext" type="submit" disabled>Join</button>
         </form>
       </main>
     </section>
@@ -98,6 +91,6 @@
       </section>
     </div>
 
-    <script src="/app.js?v=17" defer></script>
+    <script src="/app.js?v=18" defer></script>
   </body>
 </html>
