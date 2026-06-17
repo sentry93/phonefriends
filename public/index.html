@@ -15,7 +15,7 @@
     <title>Phonefriends</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=4" />
+    <link rel="stylesheet" href="/styles.css?v=5" />
   </head>
   <body>
     <section class="screen is-active" id="nameScreen" aria-labelledby="nameTitle">
@@ -40,6 +40,7 @@
     <section class="screen app-screen" id="createScreen" aria-labelledby="createTitle">
       <header class="lock-header">
         <h1 id="createTitle">phonefriends</h1>
+        <button class="debug-button" id="debugButton" type="button" hidden>debug</button>
       </header>
 
       <main class="composer" aria-live="polite">
@@ -78,6 +79,16 @@
       </main>
     </section>
 
-    <script src="/app.js?v=4" defer></script>
+    <div class="debug-backdrop" id="debugPanel" hidden>
+      <section class="debug-sheet" role="dialog" aria-modal="true" aria-labelledby="debugTitle">
+        <div class="debug-sheet-header">
+          <h2 id="debugTitle">live albums</h2>
+          <button class="debug-close" id="closeDebugButton" type="button">close</button>
+        </div>
+        <div class="debug-list" id="debugList"></div>
+      </section>
+    </div>
+
+    <script src="/app.js?v=5" defer></script>
   </body>
 </html>

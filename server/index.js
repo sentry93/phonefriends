@@ -145,6 +145,19 @@ function cleanUserId(value) {
   return cleaned || crypto.randomUUID();
 }
 
+function cleanTimestamp(value) {
+  const rawValue = cleanText(value, 48);
+  const parsed = Date.parse(rawValue);
+  return Number.isNaN(parsed) ? "" : new Date(parsed).toISOString();
+}
+
+function timestampFromPost(post) {
+  const captured = Date.parse(post.capturedAt || "");
+  if (!Number.isNaN(captured)) return new Date(captured).toISOString();
+  const fallback = Number(post.updatedAt || post.createdAt);
+  return new Date(Number.isFinite(fallback) ? fallback : Date.now()).toISOString();
+}
+
 function parseImage(imageBase64) {
   const rawValue = String(imageBase64 || "");
   const match = rawValue.match(/^data:image\/(png|jpe?g|webp);base64,([\s\S]+)$/i);
@@ -179,6 +192,7 @@ function publicPost(post) {
     name: post.name,
     caption: post.caption,
     url: `/uploads/${post.file}`,
+    capturedAt: timestampFromPost(post),
     createdAt: post.createdAt,
     updatedAt: post.updatedAt,
   };
@@ -196,6 +210,7 @@ async function handlePost(req, res) {
   const userId = cleanUserId(body.userId);
   const name = cleanText(body.name, 28);
   const caption = cleanText(body.caption, 80);
+  const capturedAt = cleanTimestamp(body.capturedAt);
   if (!name || !body.imageBase64) {
     return sendJson(res, 400, { error: "Name and image are required" });
   }
@@ -220,6 +235,7 @@ async function handlePost(req, res) {
     name,
     caption,
     file,
+    capturedAt: capturedAt || new Date(now).toISOString(),
     createdAt: previous ? previous.createdAt : now,
     updatedAt: now,
   };

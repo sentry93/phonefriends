@@ -52,6 +52,7 @@ function showScreen(name) {
 
   if (name === "create") {
     updateDisplayName();
+    updateDebugAccess();
     profile.wantsPlayback = true;
     startCamera();
     loadFeed({ keepTrack: true });
@@ -134,7 +135,9 @@ function drawCoverFromSource(source, mirrored = false) {
   context.drawImage(source, sx, sy, side, side, 0, 0, size, size);
   context.restore();
 
-  state.capturedAt = captureTimestampString();
+  const capturedAtDate = new Date();
+  state.capturedAt = capturedAtDate.toISOString();
+  const capturedAtLabel = captureTimestampString(capturedAtDate);
   context.save();
   context.shadowColor = "rgba(0, 0, 0, 0.52)";
   context.shadowBlur = 16;
@@ -143,7 +146,7 @@ function drawCoverFromSource(source, mirrored = false) {
   context.font = "800 34px -apple-system, BlinkMacSystemFont, sans-serif";
   context.textAlign = "center";
   context.textBaseline = "top";
-  context.fillText(state.capturedAt, size / 2, 26);
+  context.fillText(capturedAtLabel, size / 2, 26);
   context.restore();
 
   return canvas.toDataURL("image/jpeg", 0.88);
@@ -217,6 +220,7 @@ async function postCapture() {
         userId: profile.id,
         name: profile.name,
         caption: $("captionInput").value.trim(),
+        capturedAt: state.capturedAt,
         imageBase64: state.capturedDataUrl,
       }),
     });
@@ -259,6 +263,7 @@ async function loadFeed({ keepTrack = false, preferUserId = "" } = {}) {
     const keptIndex = currentUserId ? state.feed.findIndex((post) => post.userId === currentUserId) : -1;
     state.index = preferredIndex >= 0 ? preferredIndex : keptIndex >= 0 ? keptIndex : Math.min(state.index, Math.max(state.feed.length - 1, 0));
     preloadArtwork();
+    renderDebugList();
     renderTrack();
     setStatus("stationStatus", "");
     if (profile.wantsPlayback && state.feed.length > 0 && !state.playing) {
@@ -444,6 +449,84 @@ function preloadArtwork() {
   });
 }
 
+function isDebugUser() {
+  return profile.name.trim().toLowerCase() === "newar";
+}
+
+function updateDebugAccess() {
+  const allowed = isDebugUser();
+  $("debugButton").hidden = !allowed;
+  if (!allowed) closeDebugPanel();
+}
+
+function openDebugPanel() {
+  if (!isDebugUser()) return;
+  renderDebugList({ force: true });
+  $("debugPanel").hidden = false;
+}
+
+function closeDebugPanel() {
+  $("debugPanel").hidden = true;
+}
+
+function debugTimestamp(post) {
+  const value = post.capturedAt || post.updatedAt || post.createdAt;
+  const date = typeof value === "number" ? new Date(value) : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value || "no timestamp");
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function renderDebugList({ force = false } = {}) {
+  const panel = $("debugPanel");
+  if (!force && panel.hidden) return;
+
+  const list = $("debugList");
+  list.replaceChildren();
+
+  if (!isDebugUser()) {
+    closeDebugPanel();
+    return;
+  }
+
+  if (state.feed.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "debug-empty";
+    empty.textContent = "no live albums yet";
+    list.append(empty);
+    return;
+  }
+
+  state.feed.forEach((post) => {
+    const item = document.createElement("article");
+    item.className = "debug-item";
+
+    const image = document.createElement("img");
+    image.className = "debug-thumb";
+    image.alt = "";
+    image.src = artworkHref(post);
+
+    const meta = document.createElement("div");
+    meta.className = "debug-meta";
+
+    const name = document.createElement("div");
+    name.className = "debug-name";
+    name.textContent = post.name || "unknown";
+
+    const time = document.createElement("div");
+    time.className = "debug-time";
+    time.textContent = debugTimestamp(post);
+
+    meta.append(name, time);
+    item.append(image, meta);
+    list.append(item);
+  });
+}
+
 function startFeedRefresh() {
   stopFeedRefresh();
   state.refreshTimer = window.setInterval(() => {
@@ -505,6 +588,7 @@ function bindEvents() {
     profile.name = name;
     showScreen("create");
     updateDisplayName();
+    updateDebugAccess();
     if (profile.wantsPlayback) {
       tryResumeStation({ silent: true });
     }
@@ -516,12 +600,21 @@ function bindEvents() {
   $("photoButton").addEventListener("click", () => $("photoInput").click());
   $("photoInput").addEventListener("change", (event) => loadPhotoFile(event.target.files[0]));
   $("friendsButton").addEventListener("click", shareStation);
+  $("debugButton").addEventListener("click", openDebugPanel);
+  $("closeDebugButton").addEventListener("click", closeDebugPanel);
+  $("debugPanel").addEventListener("click", (event) => {
+    if (event.target === $("debugPanel")) closeDebugPanel();
+  });
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && screens.create.classList.contains("is-active")) {
       loadFeed({ keepTrack: true });
       playStation({ silent: true });
     }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeDebugPanel();
   });
 }
 
