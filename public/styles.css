@@ -569,7 +569,7 @@ button:disabled {
 
 .debug-item {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
+  grid-template-columns: 76px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   padding: 10px;
@@ -602,6 +602,17 @@ button:disabled {
   color: rgba(255, 249, 241, 0.66);
   font-size: 0.9rem;
   font-weight: 750;
+}
+
+.debug-delete {
+  min-height: 34px;
+  border: 1px solid rgba(255, 176, 168, 0.34);
+  border-radius: 999px;
+  padding: 0 12px;
+  color: rgba(255, 218, 214, 0.96);
+  background: rgba(255, 98, 84, 0.14);
+  font-size: 0.78rem;
+  font-weight: 850;
 }
 
 .debug-empty {

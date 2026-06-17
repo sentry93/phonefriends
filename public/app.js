@@ -700,6 +700,16 @@ function advanceTrack(delta) {
   goToTrack(state.index + delta);
 }
 
+function mediaNextTrack() {
+  advanceTrack(1);
+  claimStationPlayback({ silent: true, force: true });
+}
+
+function mediaPreviousTrack() {
+  advanceTrack(-1);
+  claimStationPlayback({ silent: true, force: true });
+}
+
 function startTrackAdvanceClock() {
   if (!isLiveTransport() || state.feed.length <= 1) {
     stopTrackAdvanceClock();
@@ -884,8 +894,10 @@ function bindMediaSessionHandlers() {
     play: () => playStation({ silent: true }),
     pause: pauseStation,
     stop: pauseStation,
-    nexttrack: () => advanceTrack(1),
-    previoustrack: () => advanceTrack(-1),
+    nexttrack: mediaNextTrack,
+    previoustrack: mediaPreviousTrack,
+    seekforward: mediaNextTrack,
+    seekbackward: mediaPreviousTrack,
   };
 
   Object.entries(actions).forEach(([action, handler]) => {
@@ -896,7 +908,7 @@ function bindMediaSessionHandlers() {
     }
   });
 
-  ["seekforward", "seekbackward", "seekto"].forEach((action) => {
+  ["seekto"].forEach((action) => {
     try {
       navigator.mediaSession.setActionHandler(action, null);
     } catch {
@@ -961,6 +973,33 @@ function debugTimestamp(post) {
   });
 }
 
+async function deleteDebugPost(post) {
+  if (!isDebugUser() || !post?.userId) return;
+  const label = post.name || post.userId;
+  if (!window.confirm(`Delete ${label}'s post?`)) return;
+
+  try {
+    const response = await fetch(`/api/post/${encodeURIComponent(post.userId)}`, {
+      method: "DELETE",
+      headers: {
+        "X-Phonefriends-Admin": profile.name,
+      },
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Delete failed");
+    state.feed = state.feed.filter((item) => item.userId !== post.userId);
+    state.index = Math.min(state.index, Math.max(state.feed.length - 1, 0));
+    updateCurrentPostPreview();
+    renderDebugList({ force: true });
+    renderTrack();
+    syncAudioSource();
+    setStatus("stationStatus", "Deleted");
+    await loadFeed({ keepTrack: false, switchToLatest: true });
+  } catch (error) {
+    setStatus("stationStatus", error.message, true);
+  }
+}
+
 function renderDebugList({ force = false } = {}) {
   const panel = $("debugPanel");
   if (!force && panel.hidden) return;
@@ -1001,8 +1040,15 @@ function renderDebugList({ force = false } = {}) {
     time.className = "debug-time";
     time.textContent = debugTimestamp(post);
 
+    const remove = document.createElement("button");
+    remove.className = "debug-delete";
+    remove.type = "button";
+    remove.textContent = "delete";
+    remove.setAttribute("aria-label", `Delete ${post.name || "post"}`);
+    remove.addEventListener("click", () => deleteDebugPost(post));
+
     meta.append(name, time);
-    item.append(image, meta);
+    item.append(image, meta, remove);
     list.append(item);
   });
 }
@@ -1012,6 +1058,11 @@ function handleRealtimeFeedEvent(event) {
   try {
     payload = JSON.parse(event.data || "{}");
   } catch {
+    return;
+  }
+
+  if (payload.type === "delete") {
+    loadFeed({ keepTrack: false, switchToLatest: true });
     return;
   }
 

@@ -122,8 +122,8 @@ function sendJson(res, status, body) {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type,X-Phonefriends-Admin",
   });
   res.end(JSON.stringify(body));
 }
@@ -176,9 +176,12 @@ function cleanText(value, maxLength) {
     .slice(0, maxLength);
 }
 
+function normalizeUserId(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+}
+
 function cleanUserId(value) {
-  const cleaned = String(value || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
-  return cleaned || crypto.randomUUID();
+  return normalizeUserId(value) || crypto.randomUUID();
 }
 
 function cleanTimestamp(value) {
@@ -234,6 +237,16 @@ function publicPost(post) {
   };
 }
 
+function broadcastFeed(payload) {
+  for (const client of feedClients) {
+    try {
+      sendSse(client.res, "feed", payload);
+    } catch {
+      feedClients.delete(client);
+    }
+  }
+}
+
 function broadcastFeedUpdate(post) {
   const payload = {
     type: "post",
@@ -243,12 +256,23 @@ function broadcastFeedUpdate(post) {
     post: publicPost(post),
   };
 
-  for (const client of feedClients) {
-    try {
-      sendSse(client.res, "feed", payload);
-    } catch {
-      feedClients.delete(client);
-    }
+  broadcastFeed(payload);
+}
+
+function broadcastFeedDelete(post) {
+  broadcastFeed({
+    type: "delete",
+    station: "default",
+    updatedAt: Date.now(),
+    userId: post.userId,
+  });
+}
+
+function deletePostFile(post) {
+  if (!post?.file) return;
+  const filePath = path.join(UPLOAD_DIR, path.basename(post.file));
+  if (filePath.startsWith(UPLOAD_DIR) && fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
   }
 }
 
@@ -306,12 +330,7 @@ async function handlePost(req, res) {
   const posts = readPosts();
   const previous = posts.find((post) => post.userId === userId);
 
-  if (previous && previous.file) {
-    const oldPath = path.join(UPLOAD_DIR, previous.file);
-    if (oldPath.startsWith(UPLOAD_DIR) && fs.existsSync(oldPath)) {
-      fs.unlinkSync(oldPath);
-    }
-  }
+  deletePostFile(previous);
 
   const now = Date.now();
   const file = `${userId}_${now}_${crypto.randomBytes(5).toString("hex")}.${ext}`;
@@ -330,6 +349,29 @@ async function handlePost(req, res) {
   writePosts(nextPosts);
   broadcastFeedUpdate(nextPost);
   sendJson(res, 200, { ok: true, post: publicPost(nextPost) });
+}
+
+function handleDeletePost(req, res, rawUserId) {
+  const adminName = cleanText(req.headers["x-phonefriends-admin"], 28).toLowerCase();
+  if (adminName !== "newar") {
+    return sendJson(res, 403, { error: "Debug delete is only available to newar" });
+  }
+
+  const userId = normalizeUserId(rawUserId);
+  if (!userId) {
+    return sendJson(res, 400, { error: "User id is required" });
+  }
+
+  const posts = readPosts();
+  const post = posts.find((item) => item.userId === userId);
+  if (!post) {
+    return sendJson(res, 404, { error: "Post not found" });
+  }
+
+  deletePostFile(post);
+  writePosts(posts.filter((item) => item.userId !== userId));
+  broadcastFeedDelete(post);
+  return sendJson(res, 200, { ok: true, userId });
 }
 
 function handleFeed(_req, res) {
@@ -403,8 +445,8 @@ async function route(req, res) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,X-Phonefriends-Admin",
     });
     res.end();
     return;
@@ -454,6 +496,16 @@ async function route(req, res) {
 
   if (url.pathname === "/api/post" && req.method === "POST") {
     return handlePost(req, res);
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/post/")) {
+    let rawUserId;
+    try {
+      rawUserId = decodeURIComponent(url.pathname.slice("/api/post/".length));
+    } catch {
+      return sendJson(res, 400, { error: "User id is invalid" });
+    }
+    return handleDeletePost(req, res, rawUserId);
   }
 
   if (url.pathname.startsWith("/api/")) {
