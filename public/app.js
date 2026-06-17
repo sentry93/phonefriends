@@ -494,16 +494,7 @@ function renderFriendsButton(count) {
   const label = document.createElement("span");
   label.textContent = friendCountText(count);
 
-  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  icon.classList.add("line-icon");
-  icon.setAttribute("viewBox", "0 0 24 24");
-  icon.setAttribute("aria-hidden", "true");
-
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", "m9 5 7 7-7 7");
-  icon.append(path);
-
-  button.replaceChildren(label, icon);
+  button.replaceChildren(label);
   button.setAttribute("aria-label", `Share station with ${count} ${count === 1 ? "friend" : "friends"}`);
 }
 
