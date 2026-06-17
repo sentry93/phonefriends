@@ -59,6 +59,8 @@ const state = {
   mediaHandlersBound: false,
   artworkPreload: new Map(),
   lastPlaybackAttempt: 0,
+  eventSource: null,
+  mediaSessionKey: "",
   cameraZoom: 1,
   cameraZoomBounds: { min: 1, max: 3, step: 0.01, hardware: false },
   cameraZoomUsesHardware: false,
@@ -79,10 +81,12 @@ function showScreen(name) {
     startCamera();
     loadFeed({ keepTrack: true });
     startFeedRefresh();
+    startRealtimeFeed();
     bindGesturePlayback();
   } else {
     stopCamera();
     stopFeedRefresh();
+    stopRealtimeFeed();
   }
 }
 
@@ -436,8 +440,14 @@ async function postCapture() {
   }
 }
 
-async function loadFeed({ keepTrack = false, preferUserId = "" } = {}) {
+function feedItemKey(post) {
+  if (!post) return "";
+  return `${post.userId || ""}:${post.updatedAt || ""}:${post.url || ""}`;
+}
+
+async function loadFeed({ keepTrack = false, preferUserId = "", switchToLatest = false } = {}) {
   const currentUserId = keepTrack && state.feed[state.index] ? state.feed[state.index].userId : "";
+  const previousNewestKey = feedItemKey(state.feed[0]);
 
   try {
     const response = await fetch("/api/feed", { cache: "no-store" });
@@ -445,9 +455,17 @@ async function loadFeed({ keepTrack = false, preferUserId = "" } = {}) {
     if (!response.ok) throw new Error(payload.error || "Feed failed");
 
     state.feed = Array.isArray(payload.posts) ? payload.posts : [];
+    const newestKey = feedItemKey(state.feed[0]);
+    const hasNewNewest = Boolean(previousNewestKey && newestKey && newestKey !== previousNewestKey);
     const preferredIndex = preferUserId ? state.feed.findIndex((post) => post.userId === preferUserId) : -1;
     const keptIndex = currentUserId ? state.feed.findIndex((post) => post.userId === currentUserId) : -1;
-    state.index = preferredIndex >= 0 ? preferredIndex : keptIndex >= 0 ? keptIndex : Math.min(state.index, Math.max(state.feed.length - 1, 0));
+    state.index = preferredIndex >= 0
+      ? preferredIndex
+      : switchToLatest || hasNewNewest
+        ? 0
+        : keptIndex >= 0
+          ? keptIndex
+          : Math.min(state.index, Math.max(state.feed.length - 1, 0));
     preloadArtwork();
     syncAudioSource();
     updateCurrentPostPreview();
@@ -838,8 +856,13 @@ function updateMediaSession() {
         { src: artworkUrl, sizes: "96x96", type: artworkType },
       ]
     : [];
+  const metadataKey = `${track.userId || ""}:${track.updatedAt || ""}:${track.caption || ""}:${artworkUrl}`;
 
   try {
+    if (state.mediaSessionKey !== metadataKey) {
+      navigator.mediaSession.metadata = null;
+      state.mediaSessionKey = metadataKey;
+    }
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.caption || "...",
       artist: track.name || "Phonefriends",
@@ -983,13 +1006,49 @@ function renderDebugList({ force = false } = {}) {
   });
 }
 
+function handleRealtimeFeedEvent(event) {
+  let payload;
+  try {
+    payload = JSON.parse(event.data || "{}");
+  } catch {
+    return;
+  }
+
+  if (payload.type !== "post") return;
+  loadFeed({
+    keepTrack: false,
+    preferUserId: payload.userId || payload.post?.userId || "",
+    switchToLatest: true,
+  });
+  if (profile.wantsPlayback) {
+    claimStationPlayback({ silent: true, force: true });
+  }
+}
+
+function startRealtimeFeed() {
+  if (state.eventSource || !("EventSource" in window)) return;
+  const source = new EventSource("/api/events");
+  state.eventSource = source;
+  source.addEventListener("feed", handleRealtimeFeedEvent);
+  source.onerror = () => {
+    /* EventSource reconnects itself; polling remains the backup path. */
+  };
+}
+
+function stopRealtimeFeed() {
+  if (!state.eventSource) return;
+  state.eventSource.removeEventListener("feed", handleRealtimeFeedEvent);
+  state.eventSource.close();
+  state.eventSource = null;
+}
+
 function startFeedRefresh() {
   stopFeedRefresh();
   state.refreshTimer = window.setInterval(() => {
-    if (!document.hidden && screens.create.classList.contains("is-active")) {
+    if (screens.create.classList.contains("is-active")) {
       loadFeed({ keepTrack: true });
     }
-  }, 6500);
+  }, 3500);
 }
 
 function stopFeedRefresh() {
@@ -1031,8 +1090,15 @@ function bindGesturePlayback() {
   document.addEventListener("touchstart", handler, { capture: true, passive: true });
   document.addEventListener("click", handler, { capture: true, passive: true });
   document.addEventListener("keydown", handler, { capture: true });
-  window.addEventListener("focus", () => claimStationPlayback({ silent: true }));
-  window.addEventListener("pageshow", () => claimStationPlayback({ silent: true }));
+  window.addEventListener("focus", () => {
+    loadFeed({ keepTrack: true });
+    claimStationPlayback({ silent: true });
+  });
+  window.addEventListener("pageshow", () => {
+    loadFeed({ keepTrack: true });
+    startRealtimeFeed();
+    claimStationPlayback({ silent: true });
+  });
 }
 
 function bindEvents() {
@@ -1070,6 +1136,7 @@ function bindEvents() {
   document.addEventListener("visibilitychange", () => {
     if (screens.create.classList.contains("is-active")) {
       loadFeed({ keepTrack: true });
+      if (!document.hidden) startRealtimeFeed();
       claimStationPlayback({ silent: true, force: true });
     }
   });

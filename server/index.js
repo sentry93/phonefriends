@@ -18,6 +18,7 @@ const STATION_TRACK_SECONDS = 10;
 const MAX_STATION_TRACKS = 100;
 const SILENCE_CACHE = new Map();
 const LIVE_SAMPLE_RATE = 8000;
+const feedClients = new Set();
 
 function ensureStorage() {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -127,6 +128,11 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function sendSse(res, event, body) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(body)}\n\n`);
+}
+
 function sendText(res, status, text) {
   res.writeHead(status, {
     "Content-Type": "text/plain; charset=utf-8",
@@ -228,6 +234,57 @@ function publicPost(post) {
   };
 }
 
+function broadcastFeedUpdate(post) {
+  const payload = {
+    type: "post",
+    station: "default",
+    updatedAt: Date.now(),
+    userId: post.userId,
+    post: publicPost(post),
+  };
+
+  for (const client of feedClients) {
+    try {
+      sendSse(client.res, "feed", payload);
+    } catch {
+      feedClients.delete(client);
+    }
+  }
+}
+
+function handleFeedEvents(req, res) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-store, no-transform",
+    "Connection": "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+    "X-Accel-Buffering": "no",
+  });
+  res.write("retry: 2500\n\n");
+
+  const client = { res };
+  feedClients.add(client);
+  sendSse(res, "feed", {
+    type: "hello",
+    station: "default",
+    updatedAt: Date.now(),
+  });
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(`: ping ${Date.now()}\n\n`);
+    } catch {
+      clearInterval(heartbeat);
+      feedClients.delete(client);
+    }
+  }, 15000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    feedClients.delete(client);
+  });
+}
+
 async function handlePost(req, res) {
   const bodyText = await readRequestBody(req);
   let body;
@@ -271,6 +328,7 @@ async function handlePost(req, res) {
   };
   const nextPosts = posts.filter((post) => post.userId !== userId).concat(nextPost);
   writePosts(nextPosts);
+  broadcastFeedUpdate(nextPost);
   sendJson(res, 200, { ok: true, post: publicPost(nextPost) });
 }
 
@@ -354,6 +412,10 @@ async function route(req, res) {
 
   if (url.pathname === "/api/health") {
     return sendJson(res, 200, { ok: true });
+  }
+
+  if (url.pathname === "/api/events" && req.method === "GET") {
+    return handleFeedEvents(req, res);
   }
 
   if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/station-live.wav") {
