@@ -1,0 +1,14 @@
+{
+  "name": "phonefriends-station",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A shared photo station controlled like music playback.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "PORT=8080 node server/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

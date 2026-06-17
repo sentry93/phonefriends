@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0b0d" />
+    <meta name="description" content="A shared photo station controlled like music playback." />
+    <meta property="og:title" content="Phonefriends" />
+    <meta property="og:description" content="Every friend is a track. Your photo is the cover." />
+    <meta property="og:image" content="/share-card.svg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Phonefriends" />
+    <title>Phonefriends</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <section class="screen is-active" id="nameScreen" aria-labelledby="nameTitle">
+      <main class="entry-panel">
+        <div class="mark" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <p class="eyebrow">Phonefriends</p>
+        <h1 id="nameTitle">Pick a name</h1>
+        <form class="name-form" id="nameForm">
+          <label class="field-label" for="nameInput">Username</label>
+          <div class="text-field">
+            <input id="nameInput" name="name" autocomplete="nickname" autocapitalize="words" maxlength="28" placeholder="Your name" />
+          </div>
+          <button class="primary-button" id="nameNext" type="submit" disabled>Next</button>
+        </form>
+      </main>
+    </section>
+
+    <section class="screen app-screen" id="createScreen" aria-labelledby="createTitle">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Phonefriends</p>
+          <h1 id="createTitle">Create</h1>
+        </div>
+        <button class="tool-button" id="shareFromCreate" type="button" aria-label="Share station" title="Share station">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16.1c-.8 0-1.5.3-2 .9L8.9 13c.1-.3.1-.6.1-1s0-.7-.1-1L16 7c.6.6 1.2.9 2 .9 1.7 0 3-1.3 3-3s-1.3-3-3-3-3 1.3-3 3c0 .3 0 .6.1.8L8 9.9C7.5 9.3 6.7 9 6 9c-1.7 0-3 1.3-3 3s1.3 3 3 3c.7 0 1.5-.3 2-.8l7.1 4.2c-.1.2-.1.5-.1.7 0 1.6 1.3 2.9 3 2.9s3-1.3 3-3-1.3-2.9-3-2.9z"/></svg>
+        </button>
+      </header>
+
+      <nav class="segmented" aria-label="Mode">
+        <button class="is-selected" type="button" id="createTab">Create</button>
+        <button type="button" id="stationTab">Station</button>
+      </nav>
+
+      <main class="composer" aria-live="polite">
+        <div class="cover" id="captureCover">
+          <video id="cameraPreview" autoplay playsinline muted></video>
+          <img id="capturedPreview" alt="" hidden />
+          <canvas id="captureCanvas" hidden></canvas>
+          <div class="cover-placeholder" id="capturePlaceholder">
+            <div class="cover-glyph" aria-hidden="true"></div>
+            <span id="capturePlaceholderText">Camera</span>
+          </div>
+          <div class="clock-chip" id="captureClock">--:--</div>
+        </div>
+
+        <label class="field-label" for="captionInput">Caption</label>
+        <div class="text-field">
+          <input id="captionInput" maxlength="80" placeholder="What should this track be called?" />
+        </div>
+
+        <div class="control-row">
+          <button class="tool-button" id="photoButton" type="button" aria-label="Choose photo" title="Choose photo">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 19V5c0-1.1-.9-2-2-2H5C3.9 3 3 3.9 3 5v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 11.5l2.5 3 3.5-4.5 4.5 6H5l3.5-4.5z"/></svg>
+          </button>
+          <button class="shutter-button" id="captureButton" type="button" aria-label="Capture" title="Capture">
+            <span></span>
+          </button>
+          <button class="tool-button" id="retakeButton" type="button" aria-label="Retake" title="Retake" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L7 7l5 5V8c2.2 0 4 1.8 4 4s-1.8 4-4 4c-1.4 0-2.7-.8-3.4-2H6.4c.8 2.3 3 4 5.6 4 3.3 0 6-2.7 6-6s-2.7-7-6-7z"/></svg>
+          </button>
+          <button class="send-button" id="postButton" type="button" disabled>
+            <span>Post</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 21 3l-8.5 18-2-7.5L3 11.5zm7.6.1 1.1 4.1 3.9-8.3-8.3 3.9 3.3.3z"/></svg>
+          </button>
+        </div>
+        <input id="photoInput" type="file" accept="image/*" hidden />
+        <p class="status-line" id="createStatus" role="status"></p>
+      </main>
+    </section>
+
+    <section class="screen app-screen" id="stationScreen" aria-labelledby="stationTitle">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Phonefriends</p>
+          <h1 id="stationTitle">Station</h1>
+        </div>
+        <button class="tool-button" id="shareFromStation" type="button" aria-label="Share station" title="Share station">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16.1c-.8 0-1.5.3-2 .9L8.9 13c.1-.3.1-.6.1-1s0-.7-.1-1L16 7c.6.6 1.2.9 2 .9 1.7 0 3-1.3 3-3s-1.3-3-3-3-3 1.3-3 3c0 .3 0 .6.1.8L8 9.9C7.5 9.3 6.7 9 6 9c-1.7 0-3 1.3-3 3s1.3 3 3 3c.7 0 1.5-.3 2-.8l7.1 4.2c-.1.2-.1.5-.1.7 0 1.6 1.3 2.9 3 2.9s3-1.3 3-3-1.3-2.9-3-2.9z"/></svg>
+        </button>
+      </header>
+
+      <nav class="segmented" aria-label="Mode">
+        <button type="button" id="createTab2">Create</button>
+        <button class="is-selected" type="button" id="stationTab2">Station</button>
+      </nav>
+
+      <main class="player">
+        <div class="cover" id="stationCover">
+          <img id="stationImage" alt="" hidden />
+          <div class="cover-placeholder" id="stationPlaceholder">
+            <div class="cover-glyph" aria-hidden="true"></div>
+            <span>No tracks yet</span>
+          </div>
+        </div>
+
+        <section class="track-info" aria-live="polite">
+          <h2 id="trackTitle">No track</h2>
+          <p id="trackArtist">Post a photo to start</p>
+        </section>
+
+        <div class="playback-row">
+          <button class="tool-button" id="previousButton" type="button" aria-label="Previous" title="Previous">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2v14H6V5zm3.5 7L18 5v14l-8.5-7z"/></svg>
+          </button>
+          <button class="play-button" id="playButton" type="button" aria-label="Play" title="Play">
+            <svg id="playIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5z"/></svg>
+          </button>
+          <button class="tool-button" id="nextButton" type="button" aria-label="Next" title="Next">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h2v14h-2V5zM6 5l8.5 7L6 19V5z"/></svg>
+          </button>
+        </div>
+
+        <div class="station-meta">
+          <span id="stationCount">0 tracks</span>
+          <span id="stationPosition">--</span>
+        </div>
+        <p class="status-line" id="stationStatus" role="status"></p>
+      </main>
+    </section>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
