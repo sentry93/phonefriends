@@ -10,6 +10,10 @@ const screens = {
 const STATION_TRACK_SECONDS = 10;
 const LIVE_TRANSPORT = "live-stream";
 const FILE_TRANSPORT = "file";
+const EMPTY_CAPTION = "...";
+/* Keeps the visible fallback as "..." while avoiding iOS suppressing a punctuation-only title. */
+const EMPTY_CAPTION_MEDIA_TITLE = "...\u2060";
+const MEDIA_SESSION_REFRESH_DELAYS = [180, 900];
 
 const profile = {
   get id() {
@@ -61,6 +65,7 @@ const state = {
   lastPlaybackAttempt: 0,
   eventSource: null,
   mediaSessionKey: "",
+  mediaSessionRefreshTimers: [],
   cameraZoom: 1,
   cameraZoomBounds: { min: 1, max: 3, step: 0.01, hardware: false },
   cameraZoomUsesHardware: false,
@@ -126,7 +131,7 @@ function updateCurrentPostPreview() {
   }
 
   $("currentPostThumb").src = artworkHref(post);
-  $("currentPostStatus").textContent = post.caption || "...";
+  $("currentPostStatus").textContent = post.caption || EMPTY_CAPTION;
   preview.hidden = false;
 }
 
@@ -841,6 +846,8 @@ function pauseStation() {
 function clearMediaSession() {
   if (!("mediaSession" in navigator)) return;
   try {
+    clearMediaSessionRefreshTimers();
+    state.mediaSessionKey = "";
     navigator.mediaSession.metadata = null;
     navigator.mediaSession.playbackState = "none";
   } catch {
@@ -848,42 +855,83 @@ function clearMediaSession() {
   }
 }
 
-function updateMediaSession() {
-  if (!("mediaSession" in navigator)) return;
-  bindMediaSessionHandlers();
-  const track = state.feed[state.index] || {
+function cleanMediaText(value, fallback) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text || fallback;
+}
+
+function mediaSessionTitle(track) {
+  const title = cleanMediaText(track?.caption, EMPTY_CAPTION);
+  return title === EMPTY_CAPTION ? EMPTY_CAPTION_MEDIA_TITLE : title;
+}
+
+function currentMediaTrack() {
+  return state.feed[state.index] || {
     name: "Phonefriends",
-    caption: "...",
+    caption: EMPTY_CAPTION,
     url: "",
     updatedAt: "",
   };
+}
+
+function mediaSessionArtwork(track) {
   const artworkUrl = track.url ? artworkHref(track) : "";
   const artworkType = track.url ? artworkMimeType(track.url) : "";
-  const artwork = artworkUrl && artworkType !== "image/svg+xml"
-    ? [
-        { src: artworkUrl, sizes: "512x512", type: artworkType },
-        { src: artworkUrl, sizes: "256x256", type: artworkType },
-        { src: artworkUrl, sizes: "192x192", type: artworkType },
-        { src: artworkUrl, sizes: "96x96", type: artworkType },
-      ]
-    : [];
-  const metadataKey = `${track.userId || ""}:${track.updatedAt || ""}:${track.caption || ""}:${artworkUrl}`;
+
+  if (!artworkUrl || artworkType === "image/svg+xml") {
+    return { artworkUrl, artwork: [] };
+  }
+
+  return {
+    artworkUrl,
+    artwork: [
+      { src: artworkUrl, sizes: "512x512", type: artworkType },
+      { src: artworkUrl, sizes: "256x256", type: artworkType },
+      { src: artworkUrl, sizes: "192x192", type: artworkType },
+      { src: artworkUrl, sizes: "96x96", type: artworkType },
+    ],
+  };
+}
+
+function clearMediaSessionRefreshTimers() {
+  state.mediaSessionRefreshTimers.forEach((timer) => window.clearTimeout(timer));
+  state.mediaSessionRefreshTimers = [];
+}
+
+function scheduleMediaSessionRefresh(metadataKey) {
+  clearMediaSessionRefreshTimers();
+  state.mediaSessionRefreshTimers = MEDIA_SESSION_REFRESH_DELAYS.map((delay) => window.setTimeout(() => {
+    if (state.mediaSessionKey !== metadataKey) return;
+    applyMediaSessionMetadata({ scheduleRefresh: false });
+  }, delay));
+}
+
+function applyMediaSessionMetadata({ scheduleRefresh = true } = {}) {
+  const track = currentMediaTrack();
+  const title = mediaSessionTitle(track);
+  const artist = cleanMediaText(track.name, "Phonefriends");
+  const { artworkUrl, artwork } = mediaSessionArtwork(track);
+  const metadataKey = `${track.userId || ""}:${track.updatedAt || ""}:${title}:${artist}:${artworkUrl}`;
 
   try {
-    if (state.mediaSessionKey !== metadataKey) {
-      navigator.mediaSession.metadata = null;
-      state.mediaSessionKey = metadataKey;
-    }
     navigator.mediaSession.metadata = new MediaMetadata({
-      title: track.caption || "...",
-      artist: track.name || "Phonefriends",
+      title,
+      artist,
       album: state.feed.length > 0 ? "Phonefriends live" : "Phonefriends",
       artwork,
     });
+    state.mediaSessionKey = metadataKey;
     navigator.mediaSession.playbackState = state.playing ? "playing" : "paused";
+    if (scheduleRefresh) scheduleMediaSessionRefresh(metadataKey);
   } catch {
     /* Media Session metadata should never prevent the audio transport from starting. */
   }
+}
+
+function updateMediaSession() {
+  if (!("mediaSession" in navigator)) return;
+  bindMediaSessionHandlers();
+  applyMediaSessionMetadata();
 }
 
 function bindMediaSessionHandlers() {
@@ -936,6 +984,12 @@ function preloadArtwork() {
     const src = artworkHref(track);
     if (state.artworkPreload.has(src)) return;
     const image = new Image();
+    image.onload = () => {
+      const current = state.feed[state.index];
+      if (current && artworkHref(current) === src) {
+        updateMediaSession();
+      }
+    };
     image.src = src;
     state.artworkPreload.set(src, image);
   });
