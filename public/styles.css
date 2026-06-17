@@ -120,10 +120,10 @@ svg.line-icon {
 
 .app-screen {
   --side-pad: 14px;
-  --stack-gap: clamp(15px, 2.2svh, 24px);
+  --stack-gap: clamp(19px, 2.8svh, 30px);
   --header-cover-gap: clamp(14px, 2.1svh, 24px);
   --header-h: calc(var(--safe-top) + clamp(50px, 7.6svh, 64px));
-  --player-h: clamp(166px, 22svh, 190px);
+  --player-h: clamp(178px, 23.8svh, 206px);
   --friends-h: 28px;
   --cover-size: min(
     calc(min(480px, 100vw) - var(--side-pad) - var(--side-pad)),
@@ -370,11 +370,11 @@ button:disabled {
 
 .glass-player {
   display: grid;
-  grid-template-rows: minmax(44px, auto) 1fr;
-  gap: clamp(10px, 1.35svh, 14px);
+  grid-template-rows: minmax(36px, auto) 1fr;
+  gap: clamp(9px, 1.15svh, 13px);
   min-height: 0;
   height: var(--player-h);
-  padding: clamp(18px, 2.25svh, 22px) 22px clamp(17px, 2.15svh, 21px);
+  padding: clamp(19px, 2.35svh, 24px) 22px clamp(18px, 2.2svh, 22px);
   border: 1px solid var(--glass-line);
   border-radius: 38px;
   background:
@@ -388,15 +388,15 @@ button:disabled {
 .status-copy {
   display: grid;
   justify-items: center;
-  gap: 3px;
+  gap: 1px;
   min-width: 0;
 }
 
 .display-name {
   max-width: 100%;
   color: rgba(255, 249, 241, 0.96);
-  font-size: 0.9rem;
-  line-height: 1.15;
+  font-size: 0.88rem;
+  line-height: 1.04;
   font-weight: 850;
   overflow-wrap: anywhere;
 }
@@ -420,7 +420,7 @@ button:disabled {
   align-items: center;
   justify-items: center;
   gap: 14px;
-  min-height: 78px;
+  min-height: 86px;
 }
 
 .glass-icon-button,
@@ -439,8 +439,18 @@ button:disabled {
 }
 
 .glass-icon-button svg {
-  width: 1.72rem;
-  height: 1.72rem;
+  width: 1.68rem;
+  height: 1.68rem;
+}
+
+.glass-icon-button .photo-icon {
+  width: 1.78rem;
+  height: 1.78rem;
+}
+
+.glass-icon-button .flip-icon {
+  width: 1.86rem;
+  height: 1.86rem;
 }
 
 .capture-action,
@@ -660,14 +670,14 @@ button:disabled {
   }
 
   .glass-player {
-    padding: clamp(17px, 2svh, 20px) 18px clamp(16px, 1.9svh, 18px);
+    padding: clamp(18px, 2.15svh, 22px) 18px clamp(17px, 2svh, 20px);
     border-radius: 34px;
   }
 
   .creation-controls {
     grid-template-columns: 56px 1fr 56px;
     gap: 10px;
-    min-height: 74px;
+    min-height: 82px;
   }
 
   .capture-action,
