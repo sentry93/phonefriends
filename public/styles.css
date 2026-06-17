@@ -83,6 +83,11 @@ svg.line-icon {
   stroke-linejoin: round;
 }
 
+svg.symbol-icon {
+  fill: currentColor;
+  stroke: none;
+}
+
 [hidden] {
   display: none !important;
 }
@@ -119,11 +124,11 @@ svg.line-icon {
 }
 
 .app-screen {
-  --side-pad: 14px;
-  --stack-gap: clamp(19px, 2.8svh, 30px);
+  --side-pad: 22px;
+  --stack-gap: clamp(24px, 3.4svh, 38px);
   --header-cover-gap: clamp(14px, 2.1svh, 24px);
   --header-h: calc(var(--safe-top) + clamp(50px, 7.6svh, 64px));
-  --player-h: clamp(178px, 23.8svh, 206px);
+  --player-h: clamp(196px, 26svh, 228px);
   --friends-h: 28px;
   --cover-size: min(
     calc(min(480px, 100vw) - var(--side-pad) - var(--side-pad)),
@@ -139,6 +144,7 @@ svg.line-icon {
   align-content: center;
   row-gap: var(--header-cover-gap);
   padding: 0 var(--side-pad) calc(var(--safe-bottom) + 10px);
+  overflow: visible;
 }
 
 .mark {
@@ -325,7 +331,7 @@ button:disabled {
   display: grid;
   gap: var(--stack-gap);
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   align-content: start;
   justify-items: stretch;
 }
@@ -341,7 +347,7 @@ button:disabled {
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04)),
     rgba(255, 255, 255, 0.08);
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.18);
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
@@ -371,10 +377,10 @@ button:disabled {
 .glass-player {
   display: grid;
   grid-template-rows: minmax(36px, auto) 1fr;
-  gap: clamp(9px, 1.15svh, 13px);
+  gap: clamp(17px, 2svh, 24px);
   min-height: 0;
   height: var(--player-h);
-  padding: clamp(19px, 2.35svh, 24px) 22px clamp(18px, 2.2svh, 22px);
+  padding: clamp(21px, 2.65svh, 27px) 22px clamp(20px, 2.45svh, 25px);
   border: 1px solid var(--glass-line);
   border-radius: 38px;
   background:
@@ -444,13 +450,19 @@ button:disabled {
 }
 
 .glass-icon-button .photo-icon {
-  width: 1.78rem;
-  height: 1.78rem;
+  width: 1.9rem;
+  height: 1.9rem;
 }
 
 .glass-icon-button .flip-icon {
-  width: 1.86rem;
-  height: 1.86rem;
+  width: 1.92rem;
+  height: 1.92rem;
+  stroke-width: 2.35;
+}
+
+.glass-icon-button .undo-icon {
+  width: 1.8rem;
+  height: 1.8rem;
 }
 
 .capture-action,
@@ -637,10 +649,10 @@ button:disabled {
   }
 
   .app-screen {
-    --side-pad: 14px;
-    --stack-gap: clamp(13px, 1.9svh, 20px);
+    --side-pad: 20px;
+    --stack-gap: clamp(22px, 3.1svh, 34px);
     --header-cover-gap: clamp(13px, 1.8svh, 20px);
-    --player-h: clamp(158px, 21svh, 178px);
+    --player-h: clamp(188px, 25svh, 214px);
   }
 
   .lock-header {
@@ -667,14 +679,14 @@ button:disabled {
   }
 
   .glass-player {
-    padding: clamp(18px, 2.15svh, 22px) 18px clamp(17px, 2svh, 20px);
+    padding: clamp(20px, 2.45svh, 24px) 18px clamp(18px, 2.2svh, 22px);
     border-radius: 34px;
   }
 
   .creation-controls {
     grid-template-columns: 56px 1fr 56px;
     gap: 10px;
-    min-height: 82px;
+    min-height: 88px;
   }
 
   .capture-action,
