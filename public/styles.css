@@ -128,8 +128,7 @@ h1 {
 }
 
 .name-form,
-.composer,
-.player {
+.composer {
   display: grid;
   gap: 12px;
 }
@@ -201,30 +200,6 @@ h1 {
 .topbar h1 {
   margin-top: 2px;
   font-size: 1.68rem;
-}
-
-.segmented {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel);
-  padding: 4px;
-}
-
-.segmented button {
-  min-height: 38px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  font-weight: 750;
-}
-
-.segmented button.is-selected {
-  background: var(--panel-2);
-  color: var(--text);
 }
 
 .cover {
@@ -300,8 +275,9 @@ h1 {
 }
 
 .playback-row {
-  grid-template-columns: 62px 84px 62px;
-  justify-content: center;
+  grid-template-columns: 48px 62px 48px;
+  justify-content: start;
+  gap: 8px;
 }
 
 .tool-button,
@@ -338,19 +314,57 @@ h1 {
 }
 
 .play-button {
-  width: 84px;
-  height: 84px;
+  width: 62px;
+  height: 62px;
   background: var(--accent);
 }
 
 .play-button svg {
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 1.45rem;
+  height: 1.45rem;
 }
 
 .send-button {
   width: 100%;
   padding: 0 16px;
+}
+
+.player {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-heading h2 {
+  color: var(--text);
+  font-size: 1.06rem;
+  line-height: 1;
+}
+
+.station-shell {
+  display: grid;
+  grid-template-columns: minmax(104px, 38%) 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.station-cover,
+.station-copy {
+  min-width: 0;
+}
+
+.station-copy {
+  display: grid;
+  gap: 10px;
 }
 
 .track-info {
@@ -359,8 +373,8 @@ h1 {
 }
 
 .track-info h2 {
-  min-height: 2rem;
-  font-size: 1.55rem;
+  min-height: 1.7rem;
+  font-size: 1.28rem;
   line-height: 1.2;
   letter-spacing: 0;
   overflow-wrap: anywhere;
@@ -376,7 +390,7 @@ h1 {
 .station-meta {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: start;
   gap: 12px;
   color: var(--faint);
   font-size: 0.86rem;
@@ -438,5 +452,18 @@ h1 {
   .send-button {
     min-width: 0;
     padding: 0 10px;
+  }
+
+  .station-shell {
+    grid-template-columns: 92px 1fr;
+  }
+
+  .playback-row {
+    grid-template-columns: 44px 58px 44px;
+  }
+
+  .play-button {
+    width: 58px;
+    height: 58px;
   }
 }

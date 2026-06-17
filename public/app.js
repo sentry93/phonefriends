@@ -5,7 +5,6 @@ const $ = (id) => document.getElementById(id);
 const screens = {
   name: $("nameScreen"),
   create: $("createScreen"),
-  station: $("stationScreen"),
 };
 
 const profile = {
@@ -23,6 +22,12 @@ const profile = {
   },
   set name(value) {
     localStorage.setItem("phonefriends_name", value);
+  },
+  get wantsPlayback() {
+    return localStorage.getItem("phonefriends_wants_playback") === "1";
+  },
+  set wantsPlayback(value) {
+    localStorage.setItem("phonefriends_wants_playback", value ? "1" : "0");
   },
 };
 
@@ -48,14 +53,11 @@ function showScreen(name) {
 
   if (name === "create") {
     startCamera();
-    stopFeedRefresh();
-  } else {
-    stopCamera();
-  }
-
-  if (name === "station") {
     loadFeed({ keepTrack: true });
     startFeedRefresh();
+  } else {
+    stopCamera();
+    stopFeedRefresh();
   }
 }
 
@@ -220,6 +222,9 @@ function loadPhotoFile(file) {
 
 async function postCapture() {
   if (!state.capturedDataUrl) return;
+  const wasPlaying = state.playing;
+  profile.wantsPlayback = true;
+  const audioStarted = await startAudioTransport();
   $("postButton").disabled = true;
   setStatus("createStatus", "Posting...");
 
@@ -239,14 +244,30 @@ async function postCapture() {
 
     setStatus("createStatus", "Posted");
     $("captionInput").value = "";
-    setTimeout(() => showScreen("station"), 350);
+    await loadFeed({ keepTrack: false, preferUserId: profile.id });
+    if (audioStarted) {
+      state.playing = true;
+      setPlayingUi(true);
+      updateMediaSession();
+      setStatus("stationStatus", "Playing");
+    } else {
+      await playStation();
+    }
+    resetCapture();
+    setStatus("createStatus", "Posted");
   } catch (error) {
+    if (audioStarted && !wasPlaying && state.audio) {
+      state.audio.pause();
+      state.playing = false;
+      profile.wantsPlayback = false;
+      setPlayingUi(false);
+    }
     setStatus("createStatus", error.message, true);
     $("postButton").disabled = false;
   }
 }
 
-async function loadFeed({ keepTrack = false } = {}) {
+async function loadFeed({ keepTrack = false, preferUserId = "" } = {}) {
   const currentUserId = keepTrack && state.feed[state.index] ? state.feed[state.index].userId : "";
 
   try {
@@ -255,10 +276,14 @@ async function loadFeed({ keepTrack = false } = {}) {
     if (!response.ok) throw new Error(payload.error || "Feed failed");
 
     state.feed = Array.isArray(payload.posts) ? payload.posts : [];
-    const keptIndex = state.feed.findIndex((post) => post.userId === currentUserId);
-    state.index = keptIndex >= 0 ? keptIndex : Math.min(state.index, Math.max(state.feed.length - 1, 0));
+    const preferredIndex = preferUserId ? state.feed.findIndex((post) => post.userId === preferUserId) : -1;
+    const keptIndex = currentUserId ? state.feed.findIndex((post) => post.userId === currentUserId) : -1;
+    state.index = preferredIndex >= 0 ? preferredIndex : keptIndex >= 0 ? keptIndex : Math.min(state.index, Math.max(state.feed.length - 1, 0));
     renderTrack();
     setStatus("stationStatus", "");
+    if (profile.wantsPlayback && state.feed.length > 0 && !state.playing) {
+      tryResumeStation();
+    }
   } catch (error) {
     setStatus("stationStatus", "Station unavailable", true);
   }
@@ -277,6 +302,8 @@ function renderTrack() {
   if (empty) {
     $("trackTitle").textContent = "No track";
     $("trackArtist").textContent = "Post a photo to start";
+    $("playButton").setAttribute("aria-label", "Start station");
+    $("playButton").title = "Start station";
     clearMediaSession();
     return;
   }
@@ -305,28 +332,50 @@ function getAudio() {
   return audio;
 }
 
-async function playStation() {
-  if (state.feed.length === 0) return;
-
+async function startAudioTransport() {
   try {
     await getAudio().play();
-    state.playing = true;
-    $("playIcon").innerHTML = icons.pause;
-    $("playButton").setAttribute("aria-label", "Pause");
-    $("playButton").title = "Pause";
-    updateMediaSession();
-    setStatus("stationStatus", "Playing");
+    return true;
   } catch {
-    setStatus("stationStatus", "Tap play again", true);
+    return false;
   }
+}
+
+function setPlayingUi(playing) {
+  $("playIcon").innerHTML = playing ? icons.pause : icons.play;
+  $("playButton").setAttribute("aria-label", playing ? "Pause station" : "Start station");
+  $("playButton").title = playing ? "Pause station" : "Start station";
+}
+
+async function playStation() {
+  profile.wantsPlayback = true;
+
+  if (state.feed.length === 0) {
+    setStatus("stationStatus", "Post a photo to start the station");
+    return;
+  }
+
+  const started = await startAudioTransport();
+  if (!started) {
+    setStatus("stationStatus", "Tap play once before locking your phone", true);
+    return;
+  }
+
+  state.playing = true;
+  setPlayingUi(true);
+  updateMediaSession();
+  setStatus("stationStatus", "Playing");
+}
+
+function tryResumeStation() {
+  playStation();
 }
 
 function pauseStation() {
   if (state.audio) state.audio.pause();
   state.playing = false;
-  $("playIcon").innerHTML = icons.play;
-  $("playButton").setAttribute("aria-label", "Play");
-  $("playButton").title = "Play";
+  profile.wantsPlayback = false;
+  setPlayingUi(false);
   updateMediaSession();
   setStatus("stationStatus", "Paused");
 }
@@ -378,7 +427,7 @@ function updateMediaSession() {
 function startFeedRefresh() {
   stopFeedRefresh();
   state.refreshTimer = window.setInterval(() => {
-    if (!document.hidden && screens.station.classList.contains("is-active")) {
+    if (!document.hidden && screens.create.classList.contains("is-active")) {
       loadFeed({ keepTrack: true });
     }
   }, 6500);
@@ -403,9 +452,9 @@ async function shareStation() {
       return;
     }
     await navigator.clipboard.writeText(shareData.url);
-    setStatus(screens.station.classList.contains("is-active") ? "stationStatus" : "createStatus", "Link copied");
+    setStatus("stationStatus", "Link copied");
   } catch {
-    setStatus(screens.station.classList.contains("is-active") ? "stationStatus" : "createStatus", "Share unavailable", true);
+    setStatus("stationStatus", "Share unavailable", true);
   }
 }
 
@@ -420,12 +469,11 @@ function bindEvents() {
     if (!name) return;
     profile.name = name;
     showScreen("create");
+    if (profile.wantsPlayback) {
+      tryResumeStation();
+    }
   });
 
-  $("createTab").addEventListener("click", () => showScreen("create"));
-  $("createTab2").addEventListener("click", () => showScreen("create"));
-  $("stationTab").addEventListener("click", () => showScreen("station"));
-  $("stationTab2").addEventListener("click", () => showScreen("station"));
   $("captureButton").addEventListener("click", captureCameraFrame);
   $("retakeButton").addEventListener("click", resetCapture);
   $("postButton").addEventListener("click", postCapture);
@@ -435,10 +483,9 @@ function bindEvents() {
   $("previousButton").addEventListener("click", () => goToTrack(state.index - 1));
   $("nextButton").addEventListener("click", () => goToTrack(state.index + 1));
   $("shareFromCreate").addEventListener("click", shareStation);
-  $("shareFromStation").addEventListener("click", shareStation);
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && screens.station.classList.contains("is-active")) {
+    if (!document.hidden && screens.create.classList.contains("is-active")) {
       loadFeed({ keepTrack: true });
     }
   });
@@ -447,3 +494,7 @@ function bindEvents() {
 bindEvents();
 updateClocks();
 window.setInterval(updateClocks, 1000);
+
+if (profile.name) {
+  showScreen("create");
+}

@@ -48,11 +48,6 @@
         </button>
       </header>
 
-      <nav class="segmented" aria-label="Mode">
-        <button class="is-selected" type="button" id="createTab">Create</button>
-        <button type="button" id="stationTab">Station</button>
-      </nav>
-
       <main class="composer" aria-live="polite">
         <div class="cover" id="captureCover">
           <video id="cameraPreview" autoplay playsinline muted></video>
@@ -87,56 +82,48 @@
         </div>
         <input id="photoInput" type="file" accept="image/*" hidden />
         <p class="status-line" id="createStatus" role="status"></p>
-      </main>
-    </section>
 
-    <section class="screen app-screen" id="stationScreen" aria-labelledby="stationTitle">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">Phonefriends</p>
-          <h1 id="stationTitle">Station</h1>
-        </div>
-        <button class="tool-button" id="shareFromStation" type="button" aria-label="Share station" title="Share station">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16.1c-.8 0-1.5.3-2 .9L8.9 13c.1-.3.1-.6.1-1s0-.7-.1-1L16 7c.6.6 1.2.9 2 .9 1.7 0 3-1.3 3-3s-1.3-3-3-3-3 1.3-3 3c0 .3 0 .6.1.8L8 9.9C7.5 9.3 6.7 9 6 9c-1.7 0-3 1.3-3 3s1.3 3 3 3c.7 0 1.5-.3 2-.8l7.1 4.2c-.1.2-.1.5-.1.7 0 1.6 1.3 2.9 3 2.9s3-1.3 3-3-1.3-2.9-3-2.9z"/></svg>
-        </button>
-      </header>
-
-      <nav class="segmented" aria-label="Mode">
-        <button type="button" id="createTab2">Create</button>
-        <button class="is-selected" type="button" id="stationTab2">Station</button>
-      </nav>
-
-      <main class="player">
-        <div class="cover" id="stationCover">
-          <img id="stationImage" alt="" hidden />
-          <div class="cover-placeholder" id="stationPlaceholder">
-            <div class="cover-glyph" aria-hidden="true"></div>
-            <span>No tracks yet</span>
+        <section class="player" aria-labelledby="stationTitle">
+          <div class="section-heading">
+            <p class="eyebrow">Now Playing</p>
+            <h2 id="stationTitle">Station</h2>
           </div>
-        </div>
 
-        <section class="track-info" aria-live="polite">
-          <h2 id="trackTitle">No track</h2>
-          <p id="trackArtist">Post a photo to start</p>
+          <div class="station-shell">
+            <div class="cover station-cover" id="stationCover">
+              <img id="stationImage" alt="" hidden />
+              <div class="cover-placeholder" id="stationPlaceholder">
+                <div class="cover-glyph" aria-hidden="true"></div>
+                <span>No tracks yet</span>
+              </div>
+            </div>
+
+            <div class="station-copy">
+              <section class="track-info" aria-live="polite">
+                <h2 id="trackTitle">No track</h2>
+                <p id="trackArtist">Post a photo to start</p>
+              </section>
+
+              <div class="playback-row">
+                <button class="tool-button" id="previousButton" type="button" aria-label="Previous" title="Previous">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2v14H6V5zm3.5 7L18 5v14l-8.5-7z"/></svg>
+                </button>
+                <button class="play-button" id="playButton" type="button" aria-label="Start station" title="Start station">
+                  <svg id="playIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5z"/></svg>
+                </button>
+                <button class="tool-button" id="nextButton" type="button" aria-label="Next" title="Next">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h2v14h-2V5zM6 5l8.5 7L6 19V5z"/></svg>
+                </button>
+              </div>
+
+              <div class="station-meta">
+                <span id="stationCount">0 tracks</span>
+                <span id="stationPosition">--</span>
+              </div>
+              <p class="status-line" id="stationStatus" role="status"></p>
+            </div>
+          </div>
         </section>
-
-        <div class="playback-row">
-          <button class="tool-button" id="previousButton" type="button" aria-label="Previous" title="Previous">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2v14H6V5zm3.5 7L18 5v14l-8.5-7z"/></svg>
-          </button>
-          <button class="play-button" id="playButton" type="button" aria-label="Play" title="Play">
-            <svg id="playIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7L8 5z"/></svg>
-          </button>
-          <button class="tool-button" id="nextButton" type="button" aria-label="Next" title="Next">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h2v14h-2V5zM6 5l8.5 7L6 19V5z"/></svg>
-          </button>
-        </div>
-
-        <div class="station-meta">
-          <span id="stationCount">0 tracks</span>
-          <span id="stationPosition">--</span>
-        </div>
-        <p class="status-line" id="stationStatus" role="status"></p>
       </main>
     </section>
 
