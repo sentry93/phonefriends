@@ -18,10 +18,10 @@ const STATION_TRACK_SECONDS = 10;
 const MAX_STATION_TRACKS = 100;
 const SILENCE_CACHE = new Map();
 const LIVE_SAMPLE_RATE = 8000;
-const HLS_SEGMENT_SECONDS = 2;
+const LIVE_MP3_SEGMENT = fs.readFileSync(path.join(__dirname, "live-segment.mp3"));
+const HLS_SEGMENT_SECONDS = 2.064;
+const HLS_TARGET_DURATION = Math.ceil(HLS_SEGMENT_SECONDS);
 const HLS_WINDOW_SEGMENTS = 5;
-const HLS_SEGMENT_CACHE = new Map();
-const STREAM_PCM_CHUNK = createQuietPcm(1);
 const feedClients = new Set();
 
 function ensureStorage() {
@@ -106,28 +106,56 @@ function stationWav(trackCount) {
   return SILENCE_CACHE.get(count);
 }
 
-function hlsSegmentWav() {
-  if (!HLS_SEGMENT_CACHE.has("wav")) {
-    HLS_SEGMENT_CACHE.set("wav", createQuietWav(HLS_SEGMENT_SECONDS));
-  }
-  return HLS_SEGMENT_CACHE.get("wav");
+function syncsafeInt(value) {
+  return Buffer.from([
+    (value >> 21) & 0x7f,
+    (value >> 14) & 0x7f,
+    (value >> 7) & 0x7f,
+    value & 0x7f,
+  ]);
+}
+
+function id3TimestampTag(sequence) {
+  const owner = Buffer.from("com.apple.streaming.transportStreamTimestamp\0", "ascii");
+  const timestamp = BigInt(Math.max(0, Number(sequence) || 0)) * BigInt(Math.round(HLS_SEGMENT_SECONDS * 90000));
+  const timestampData = Buffer.alloc(8);
+  timestampData.writeBigUInt64BE(timestamp & 0x1ffffffffn);
+
+  const frameBody = Buffer.concat([owner, timestampData]);
+  const frameHeader = Buffer.concat([
+    Buffer.from("PRIV", "ascii"),
+    syncsafeInt(frameBody.length),
+    Buffer.from([0, 0]),
+  ]);
+  const frame = Buffer.concat([frameHeader, frameBody]);
+  const tagHeader = Buffer.concat([
+    Buffer.from("ID3", "ascii"),
+    Buffer.from([4, 0, 0]),
+    syncsafeInt(frame.length),
+  ]);
+
+  return Buffer.concat([tagHeader, frame]);
+}
+
+function hlsSegmentMp3(sequence) {
+  return Buffer.concat([id3TimestampTag(sequence), LIVE_MP3_SEGMENT]);
 }
 
 function liveHlsPlaylist() {
-  const segmentMs = HLS_SEGMENT_SECONDS * 1000;
+  const segmentMs = Math.round(HLS_SEGMENT_SECONDS * 1000);
   const newestSequence = Math.floor(Date.now() / segmentMs) - 1;
   const firstSequence = Math.max(0, newestSequence - HLS_WINDOW_SEGMENTS + 1);
   const lines = [
     "#EXTM3U",
     "#EXT-X-VERSION:3",
-    `#EXT-X-TARGETDURATION:${HLS_SEGMENT_SECONDS}`,
+    `#EXT-X-TARGETDURATION:${HLS_TARGET_DURATION}`,
     `#EXT-X-MEDIA-SEQUENCE:${firstSequence}`,
   ];
 
   for (let sequence = firstSequence; sequence < firstSequence + HLS_WINDOW_SEGMENTS; sequence += 1) {
     lines.push(`#EXT-X-PROGRAM-DATE-TIME:${new Date(sequence * segmentMs).toISOString()}`);
     lines.push(`#EXTINF:${HLS_SEGMENT_SECONDS.toFixed(3)},`);
-    lines.push(`/station-segment/${sequence}.wav`);
+    lines.push(`/station-segment/${sequence}.mp3`);
   }
 
   return `${lines.join("\n")}\n`;
@@ -150,7 +178,7 @@ function sendLiveHlsPlaylist(req, res) {
 
 function sendStationStream(req, res) {
   res.writeHead(200, {
-    "Content-Type": "audio/wav",
+    "Content-Type": "audio/mpeg",
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
   });
@@ -160,14 +188,13 @@ function sendStationStream(req, res) {
     return;
   }
 
-  res.write(createWavHeader(0xffffffff));
-  res.write(STREAM_PCM_CHUNK);
+  res.write(LIVE_MP3_SEGMENT);
 
   const streamTimer = setInterval(() => {
     if (!res.writableEnded) {
-      res.write(STREAM_PCM_CHUNK);
+      res.write(LIVE_MP3_SEGMENT);
     }
-  }, 1000);
+  }, Math.round(HLS_SEGMENT_SECONDS * 1000));
 
   const cleanup = () => clearInterval(streamTimer);
   req.on("close", cleanup);
@@ -539,11 +566,12 @@ async function route(req, res) {
     return sendLiveHlsPlaylist(req, res);
   }
 
-  if ((req.method === "GET" || req.method === "HEAD") && /^\/station-segment\/\d+\.wav$/.test(url.pathname)) {
-    const stationAudio = hlsSegmentWav();
+  if ((req.method === "GET" || req.method === "HEAD") && /^\/station-segment\/\d+\.mp3$/.test(url.pathname)) {
+    const sequence = Number(url.pathname.match(/^\/station-segment\/(\d+)\.mp3$/)?.[1] || 0);
+    const stationAudio = hlsSegmentMp3(sequence);
     if (req.method === "HEAD") {
       res.writeHead(200, {
-        "Content-Type": "audio/wav",
+        "Content-Type": "audio/mpeg",
         "Content-Length": stationAudio.length,
         "Cache-Control": "public, max-age=30",
         "X-Content-Type-Options": "nosniff",
@@ -551,10 +579,10 @@ async function route(req, res) {
       res.end();
       return;
     }
-    return sendBuffer(res, 200, stationAudio, "audio/wav", "public, max-age=30");
+    return sendBuffer(res, 200, stationAudio, "audio/mpeg", "public, max-age=30");
   }
 
-  if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/station-stream.wav") {
+  if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/station-stream.mp3") {
     return sendStationStream(req, res);
   }
 

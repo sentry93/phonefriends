@@ -524,7 +524,7 @@ function stationHlsSrc() {
 }
 
 function stationStreamSrc() {
-  return "/station-stream.wav";
+  return "/station-stream.mp3";
 }
 
 function supportsHlsTransport() {
@@ -918,8 +918,6 @@ function bindMediaSessionHandlers() {
     stop: pauseStation,
     nexttrack: mediaNextTrack,
     previoustrack: mediaPreviousTrack,
-    seekforward: mediaNextTrack,
-    seekbackward: mediaPreviousTrack,
   };
 
   Object.entries(actions).forEach(([action, handler]) => {
@@ -930,7 +928,7 @@ function bindMediaSessionHandlers() {
     }
   });
 
-  ["seekto"].forEach((action) => {
+  ["seekbackward", "seekforward", "seekto"].forEach((action) => {
     try {
       navigator.mediaSession.setActionHandler(action, null);
     } catch {
