@@ -35,12 +35,15 @@ const state = {
   stream: null,
   facingMode: "user",
   capturedDataUrl: "",
+  capturedAt: "",
   feed: [],
   index: 0,
   playing: false,
   audio: null,
   refreshTimer: null,
   gesturePlaybackBound: false,
+  mediaHandlersBound: false,
+  artworkPreload: new Map(),
 };
 
 function showScreen(name) {
@@ -72,6 +75,10 @@ function updateNameButton() {
 
 function updateDisplayName() {
   $("displayNameLabel").textContent = profile.name || "you";
+}
+
+function captureTimestampString(date = new Date()) {
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 async function startCamera() {
@@ -127,6 +134,18 @@ function drawCoverFromSource(source, mirrored = false) {
   context.drawImage(source, sx, sy, side, side, 0, 0, size, size);
   context.restore();
 
+  state.capturedAt = captureTimestampString();
+  context.save();
+  context.shadowColor = "rgba(0, 0, 0, 0.52)";
+  context.shadowBlur = 16;
+  context.shadowOffsetY = 2;
+  context.fillStyle = "rgba(255, 255, 255, 0.96)";
+  context.font = "800 34px -apple-system, BlinkMacSystemFont, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "top";
+  context.fillText(state.capturedAt, size / 2, 26);
+  context.restore();
+
   return canvas.toDataURL("image/jpeg", 0.88);
 }
 
@@ -139,6 +158,7 @@ function setCaptured(dataUrl) {
   $("postButton").hidden = false;
   $("captureButton").hidden = true;
   $("retakeButton").disabled = false;
+  $("retakeButton").hidden = false;
   stopCamera();
 }
 
@@ -157,12 +177,14 @@ function captureCameraFrame() {
 
 function resetCapture() {
   state.capturedDataUrl = "";
+  state.capturedAt = "";
   $("capturedPreview").hidden = true;
   $("capturedPreview").removeAttribute("src");
   $("postButton").disabled = true;
   $("postButton").hidden = true;
   $("captureButton").hidden = false;
   $("retakeButton").disabled = true;
+  $("retakeButton").hidden = true;
   $("cameraPreview").hidden = false;
   setStatus("createStatus", "");
   startCamera();
@@ -236,6 +258,7 @@ async function loadFeed({ keepTrack = false, preferUserId = "" } = {}) {
     const preferredIndex = preferUserId ? state.feed.findIndex((post) => post.userId === preferUserId) : -1;
     const keptIndex = currentUserId ? state.feed.findIndex((post) => post.userId === currentUserId) : -1;
     state.index = preferredIndex >= 0 ? preferredIndex : keptIndex >= 0 ? keptIndex : Math.min(state.index, Math.max(state.feed.length - 1, 0));
+    preloadArtwork();
     renderTrack();
     setStatus("stationStatus", "");
     if (profile.wantsPlayback && state.feed.length > 0 && !state.playing) {
@@ -266,6 +289,11 @@ function goToTrack(index) {
   if (state.feed.length === 0) return;
   state.index = (index + state.feed.length) % state.feed.length;
   renderTrack();
+  keepTransportAlive();
+}
+
+function advanceTrack(delta) {
+  goToTrack(state.index + delta);
 }
 
 function getAudio() {
@@ -284,6 +312,18 @@ async function startAudioTransport() {
     return true;
   } catch {
     return false;
+  }
+}
+
+function keepTransportAlive() {
+  const audio = getAudio();
+  try {
+    audio.currentTime = 0;
+  } catch {
+    /* Some browsers disallow currentTime writes during metadata changes. */
+  }
+  if (state.playing) {
+    audio.play().catch(() => {});
   }
 }
 
@@ -330,27 +370,46 @@ function clearMediaSession() {
 
 function updateMediaSession() {
   if (!("mediaSession" in navigator) || state.feed.length === 0) return;
+  bindMediaSessionHandlers();
   const track = state.feed[state.index];
-  const artworkUrl = new URL(track.url, location.origin).href;
+  const artworkUrl = artworkHref(track);
+  const artworkType = artworkMimeType(track.url);
 
   navigator.mediaSession.metadata = new MediaMetadata({
     title: track.caption || "Untitled",
     artist: track.name,
     album: "Phonefriends",
     artwork: [
-      { src: artworkUrl, sizes: "512x512", type: "image/jpeg" },
-      { src: artworkUrl, sizes: "256x256", type: "image/jpeg" },
-      { src: artworkUrl, sizes: "192x192", type: "image/jpeg" },
-      { src: artworkUrl, sizes: "96x96", type: "image/jpeg" },
+      { src: artworkUrl, sizes: "512x512", type: artworkType },
+      { src: artworkUrl, sizes: "256x256", type: artworkType },
+      { src: artworkUrl, sizes: "192x192", type: artworkType },
+      { src: artworkUrl, sizes: "96x96", type: artworkType },
     ],
   });
   navigator.mediaSession.playbackState = state.playing ? "playing" : "paused";
+  try {
+    navigator.mediaSession.setPositionState({
+      duration: Math.max(state.feed.length * 30, 30),
+      playbackRate: 1,
+      position: Math.min(state.index * 30, Math.max(state.feed.length * 30 - 1, 0)),
+    });
+  } catch {
+    /* Position state is optional and not supported by every Media Session implementation. */
+  }
+}
+
+function bindMediaSessionHandlers() {
+  if (!("mediaSession" in navigator) || state.mediaHandlersBound) return;
+  state.mediaHandlersBound = true;
 
   const actions = {
-    play: playStation,
+    play: () => playStation({ silent: true }),
     pause: pauseStation,
-    nexttrack: () => goToTrack(state.index + 1),
-    previoustrack: () => goToTrack(state.index - 1),
+    nexttrack: () => advanceTrack(1),
+    previoustrack: () => advanceTrack(-1),
+    seekforward: () => advanceTrack(1),
+    seekbackward: () => advanceTrack(-1),
+    seekto: () => advanceTrack(1),
   };
 
   Object.entries(actions).forEach(([action, handler]) => {
@@ -359,6 +418,29 @@ function updateMediaSession() {
     } catch {
       /* Some browsers expose Media Session but not every action. */
     }
+  });
+}
+
+function artworkHref(track) {
+  const url = new URL(track.url, location.origin);
+  if (track.updatedAt) url.searchParams.set("v", String(track.updatedAt));
+  return url.href;
+}
+
+function artworkMimeType(url) {
+  const lower = String(url).toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  return "image/jpeg";
+}
+
+function preloadArtwork() {
+  state.feed.forEach((track) => {
+    const src = artworkHref(track);
+    if (state.artworkPreload.has(src)) return;
+    const image = new Image();
+    image.src = src;
+    state.artworkPreload.set(src, image);
   });
 }
 
@@ -393,24 +475,6 @@ async function shareStation() {
     setStatus("stationStatus", "Link copied");
   } catch {
     setStatus("stationStatus", "Share unavailable", true);
-  }
-}
-
-function openShareModal() {
-  $("shareLinkText").textContent = location.origin;
-  $("shareModal").hidden = false;
-}
-
-function closeShareModal() {
-  $("shareModal").hidden = true;
-}
-
-async function copyShareLink() {
-  try {
-    await navigator.clipboard.writeText(location.origin);
-    setStatus("stationStatus", "Link copied");
-  } catch {
-    setStatus("stationStatus", "Copy unavailable", true);
   }
 }
 
@@ -451,13 +515,7 @@ function bindEvents() {
   $("postButton").addEventListener("click", postCapture);
   $("photoButton").addEventListener("click", () => $("photoInput").click());
   $("photoInput").addEventListener("change", (event) => loadPhotoFile(event.target.files[0]));
-  $("friendsButton").addEventListener("click", openShareModal);
-  $("closeShareModal").addEventListener("click", closeShareModal);
-  $("nativeShareButton").addEventListener("click", shareStation);
-  $("copyShareButton").addEventListener("click", copyShareLink);
-  $("shareModal").addEventListener("click", (event) => {
-    if (event.target === $("shareModal")) closeShareModal();
-  });
+  $("friendsButton").addEventListener("click", shareStation);
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && screens.create.classList.contains("is-active")) {
