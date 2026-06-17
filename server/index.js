@@ -70,9 +70,10 @@ function createQuietPcm(seconds = 1, sampleRate = LIVE_SAMPLE_RATE) {
   const safeSeconds = Math.max(1, Math.floor(seconds));
   const samples = sampleRate * safeSeconds;
   const buffer = Buffer.alloc(samples * 2);
+  const amplitude = 12;
 
   for (let i = 0; i < samples; i += 1) {
-    const sample = Math.round(Math.sin((2 * Math.PI * 220 * i) / sampleRate) * 3);
+    const sample = Math.round(Math.sin((2 * Math.PI * 220 * i) / sampleRate) * amplitude);
     buffer.writeInt16LE(sample, i * 2);
   }
 

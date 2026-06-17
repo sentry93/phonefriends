@@ -47,6 +47,7 @@ const state = {
   gesturePlaybackBound: false,
   mediaHandlersBound: false,
   artworkPreload: new Map(),
+  lastPlaybackAttempt: 0,
 };
 
 function showScreen(name) {
@@ -368,7 +369,8 @@ function advanceTrack(delta) {
 function getAudio() {
   if (state.audio) return state.audio;
   const audio = new Audio(stationAudioSrc());
-  audio.volume = 0.0001;
+  audio.volume = 1;
+  audio.muted = false;
   audio.preload = "auto";
   state.audio = audio;
   bindAudioEvents(audio);
@@ -385,6 +387,23 @@ async function startAudioTransport() {
   } catch {
     return false;
   }
+}
+
+function shouldThrottlePlaybackAttempt() {
+  const now = Date.now();
+  if (now - state.lastPlaybackAttempt < 500) return true;
+  state.lastPlaybackAttempt = now;
+  return false;
+}
+
+function claimStationPlayback({ silent = true, force = false } = {}) {
+  profile.wantsPlayback = true;
+  if (!force && state.playing) {
+    updateMediaSession();
+    return;
+  }
+  if (!force && shouldThrottlePlaybackAttempt()) return;
+  playStation({ silent });
 }
 
 function keepTransportAlive() {
@@ -622,14 +641,17 @@ function bindGesturePlayback() {
   state.gesturePlaybackBound = true;
 
   const handler = () => {
-    if (profile.wantsPlayback && !state.playing) {
-      playStation({ silent: true });
+    if (profile.name || screens.create.classList.contains("is-active")) {
+      claimStationPlayback({ silent: true, force: true });
     }
   };
 
-  document.addEventListener("pointerdown", handler, { passive: true });
-  document.addEventListener("touchstart", handler, { passive: true });
-  document.addEventListener("keydown", handler);
+  document.addEventListener("pointerdown", handler, { capture: true, passive: true });
+  document.addEventListener("touchstart", handler, { capture: true, passive: true });
+  document.addEventListener("click", handler, { capture: true, passive: true });
+  document.addEventListener("keydown", handler, { capture: true });
+  window.addEventListener("focus", () => claimStationPlayback({ silent: true }));
+  window.addEventListener("pageshow", () => claimStationPlayback({ silent: true }));
 }
 
 function bindEvents() {
@@ -642,8 +664,7 @@ function bindEvents() {
     const name = $("nameInput").value.trim();
     if (!name) return;
     profile.name = name;
-    profile.wantsPlayback = true;
-    playStation({ silent: true });
+    claimStationPlayback({ silent: true, force: true });
     showScreen("create");
     updateDisplayName();
     updateDebugAccess();
@@ -666,9 +687,9 @@ function bindEvents() {
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && screens.create.classList.contains("is-active")) {
+    if (screens.create.classList.contains("is-active")) {
       loadFeed({ keepTrack: true });
-      playStation({ silent: true });
+      claimStationPlayback({ silent: true, force: true });
     }
   });
 
@@ -678,6 +699,7 @@ function bindEvents() {
 }
 
 bindEvents();
+bindGesturePlayback();
 
 if (profile.name) {
   showScreen("create");
