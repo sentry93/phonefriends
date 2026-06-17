@@ -112,7 +112,7 @@ function updateCurrentPostPreview() {
   }
 
   $("currentPostThumb").src = artworkHref(post);
-  $("currentPostStatus").textContent = post.caption || "your photo";
+  $("currentPostStatus").textContent = post.caption || "...";
   preview.hidden = false;
 }
 
@@ -824,7 +824,7 @@ function updateMediaSession() {
   bindMediaSessionHandlers();
   const track = state.feed[state.index] || {
     name: "Phonefriends",
-    caption: "Live station",
+    caption: "...",
     url: "",
     updatedAt: "",
   };
@@ -841,7 +841,7 @@ function updateMediaSession() {
 
   try {
     navigator.mediaSession.metadata = new MediaMetadata({
-      title: track.caption || "Live station",
+      title: track.caption || "...",
       artist: track.name || "Phonefriends",
       album: state.feed.length > 0 ? "Phonefriends live" : "Phonefriends",
       artwork,
