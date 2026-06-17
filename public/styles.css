@@ -271,7 +271,7 @@ button:disabled {
   object-fit: cover;
 }
 
-.cover video {
+.cover video.is-mirrored {
   transform: scaleX(-1);
 }
 

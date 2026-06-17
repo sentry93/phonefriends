@@ -91,6 +91,9 @@ async function startCamera() {
   }
 
   try {
+    const preview = $("cameraPreview");
+    preview.classList.toggle("is-mirrored", state.facingMode === "user");
+    $("flipCameraButton").disabled = true;
     state.stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: state.facingMode,
@@ -99,10 +102,12 @@ async function startCamera() {
       },
       audio: false,
     });
-    $("cameraPreview").srcObject = state.stream;
-    $("cameraPreview").hidden = false;
+    preview.srcObject = state.stream;
+    preview.hidden = false;
+    $("flipCameraButton").disabled = false;
     setStatus("createStatus", "");
   } catch (error) {
+    $("flipCameraButton").disabled = false;
     setStatus("createStatus", "Camera unavailable. Choose a photo instead.", true);
   }
 }
@@ -160,6 +165,8 @@ function setCaptured(dataUrl) {
   $("postButton").disabled = false;
   $("postButton").hidden = false;
   $("captureButton").hidden = true;
+  $("flipCameraButton").disabled = true;
+  $("flipCameraButton").hidden = true;
   $("retakeButton").disabled = false;
   $("retakeButton").hidden = false;
   stopCamera();
@@ -186,11 +193,20 @@ function resetCapture() {
   $("postButton").disabled = true;
   $("postButton").hidden = true;
   $("captureButton").hidden = false;
+  $("flipCameraButton").disabled = false;
+  $("flipCameraButton").hidden = false;
   $("retakeButton").disabled = true;
   $("retakeButton").hidden = true;
   $("cameraPreview").hidden = false;
   setStatus("createStatus", "");
   startCamera();
+}
+
+async function flipCamera() {
+  if (state.capturedDataUrl || $("flipCameraButton").disabled) return;
+  state.facingMode = state.facingMode === "user" ? "environment" : "user";
+  stopCamera();
+  await startCamera();
 }
 
 function loadPhotoFile(file) {
@@ -595,6 +611,7 @@ function bindEvents() {
   });
 
   $("captureButton").addEventListener("click", captureCameraFrame);
+  $("flipCameraButton").addEventListener("click", flipCamera);
   $("retakeButton").addEventListener("click", resetCapture);
   $("postButton").addEventListener("click", postCapture);
   $("photoButton").addEventListener("click", () => $("photoInput").click());
