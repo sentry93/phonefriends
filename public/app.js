@@ -8,7 +8,8 @@ const screens = {
 };
 
 const STATION_TRACK_SECONDS = 10;
-const LIVE_TRANSPORT = "live-stream";
+const HLS_TRANSPORT = "hls-live";
+const STREAM_TRANSPORT = "stream-live";
 const FILE_TRANSPORT = "file";
 const EMPTY_CAPTION = "...";
 /* Keeps the visible fallback as "..." while avoiding iOS suppressing a punctuation-only title. */
@@ -51,11 +52,8 @@ const state = {
   audioEventsBound: false,
   audioTrackCount: 0,
   audioTransportMode: "",
-  forceFileTransport: false,
-  liveAudioContext: null,
-  liveDestination: null,
-  liveOscillator: null,
-  liveGain: null,
+  forceHlsTransport: false,
+  forceStreamTransport: false,
   trackAdvanceTimer: null,
   refreshTimer: null,
   gesturePlaybackBound: false,
@@ -521,63 +519,34 @@ function stationAudioSrc() {
   return `/silence.wav?tracks=${stationTrackCount()}`;
 }
 
-function supportsLiveAudioTransport() {
-  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+function stationHlsSrc() {
+  return "/station.m3u8";
+}
+
+function stationStreamSrc() {
+  return "/station-stream.wav";
+}
+
+function supportsHlsTransport() {
   const audio = document.createElement("audio");
   return Boolean(
-    !state.forceFileTransport &&
-      AudioContextCtor &&
-      "srcObject" in audio &&
-      typeof AudioContextCtor.prototype.createMediaStreamDestination === "function",
+    !state.forceHlsTransport &&
+      (
+        audio.canPlayType("application/vnd.apple.mpegurl") ||
+        audio.canPlayType("application/x-mpegURL") ||
+        audio.canPlayType("audio/mpegurl")
+      ),
   );
 }
 
 function preferredTransportMode() {
-  return supportsLiveAudioTransport() ? LIVE_TRANSPORT : FILE_TRANSPORT;
+  if (supportsHlsTransport()) return HLS_TRANSPORT;
+  if (!state.forceStreamTransport) return STREAM_TRANSPORT;
+  return FILE_TRANSPORT;
 }
 
 function isLiveTransport() {
-  return state.audioTransportMode === LIVE_TRANSPORT;
-}
-
-function liveAudioContext() {
-  if (state.liveAudioContext) return state.liveAudioContext;
-  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextCtor) return null;
-  state.liveAudioContext = new AudioContextCtor();
-  return state.liveAudioContext;
-}
-
-function liveAudioStream() {
-  if (state.liveDestination) return state.liveDestination.stream;
-
-  const context = liveAudioContext();
-  if (!context || typeof context.createMediaStreamDestination !== "function") {
-    throw new Error("Live audio is unavailable");
-  }
-
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
-  const destination = context.createMediaStreamDestination();
-
-  oscillator.type = "sine";
-  oscillator.frequency.value = 120;
-  gain.gain.value = 0.0009;
-  oscillator.connect(gain);
-  gain.connect(destination);
-  oscillator.start();
-
-  state.liveOscillator = oscillator;
-  state.liveGain = gain;
-  state.liveDestination = destination;
-  return destination.stream;
-}
-
-function resumeLiveAudioContext() {
-  if (!isLiveTransport() || !state.liveAudioContext || state.liveAudioContext.state !== "suspended") {
-    return Promise.resolve();
-  }
-  return state.liveAudioContext.resume();
+  return state.audioTransportMode === HLS_TRANSPORT || state.audioTransportMode === STREAM_TRANSPORT;
 }
 
 function isAutoplayBlocked(error) {
@@ -611,29 +580,20 @@ function syncAudioSource({ preserveTrack = true } = {}) {
   const nextMode = preferredTransportMode();
   const preservedIndex = preserveTrack ? state.index : 0;
 
-  if (nextMode === LIVE_TRANSPORT) {
-    if (
-      state.audioTrackCount === nextTrackCount &&
-      state.audioTransportMode === LIVE_TRANSPORT &&
-      state.audio.srcObject === state.liveDestination?.stream
-    ) {
-      return;
-    }
+  if (nextMode === HLS_TRANSPORT || nextMode === STREAM_TRANSPORT) {
+    const nextSrc = nextMode === HLS_TRANSPORT ? stationHlsSrc() : stationStreamSrc();
+    if (state.audioTransportMode === nextMode && state.audio.src.endsWith(nextSrc)) return;
 
     const wasPlaying = state.playing && !state.audio.paused;
     state.audioTrackCount = nextTrackCount;
-    state.audioTransportMode = LIVE_TRANSPORT;
-    try {
-      state.audio.removeAttribute("src");
-      state.audio.srcObject = liveAudioStream();
-      state.audio.loop = false;
-    } catch {
-      state.forceFileTransport = true;
-      syncAudioSource({ preserveTrack });
-      return;
-    }
+    state.audioTransportMode = nextMode;
+    state.audio.removeAttribute("src");
+    state.audio.srcObject = null;
+    state.audio.src = nextSrc;
+    state.audio.loop = false;
+    state.audio.load();
     if (wasPlaying) {
-      startAudioTransport({ fallback: false });
+      startAudioTransport({ fallback: true });
     }
     return;
   }
@@ -691,6 +651,11 @@ function bindAudioEvents(audio) {
     stopTrackAdvanceClock();
     updateMediaSession();
   });
+  audio.addEventListener("error", () => {
+    if (!profile.wantsPlayback || !forceNextAudioTransport()) return;
+    syncAudioSource();
+    startAudioTransport({ fallback: true });
+  });
 }
 
 function goToTrack(index) {
@@ -733,9 +698,21 @@ function stopTrackAdvanceClock() {
   state.trackAdvanceTimer = null;
 }
 
+function forceNextAudioTransport() {
+  if (state.audioTransportMode === HLS_TRANSPORT && !state.forceHlsTransport) {
+    state.forceHlsTransport = true;
+    return true;
+  }
+  if (state.audioTransportMode === STREAM_TRANSPORT && !state.forceStreamTransport) {
+    state.forceStreamTransport = true;
+    return true;
+  }
+  return false;
+}
+
 function getAudio() {
   if (state.audio) return state.audio;
-  const audio = new Audio();
+  const audio = $("stationAudio") || new Audio();
   audio.volume = 1;
   audio.muted = false;
   audio.preload = "auto";
@@ -755,9 +732,8 @@ function startAudioTransport({ fallback = true } = {}) {
     if (!isLiveTransport()) setAudioToTrack(state.index);
     updateMediaSession();
 
-    const resumePromise = resumeLiveAudioContext();
     const playResult = audio.play();
-    return Promise.all([Promise.resolve(resumePromise), Promise.resolve(playResult)])
+    return Promise.resolve(playResult)
       .then(() => {
         state.playing = true;
         startTrackAdvanceClock();
@@ -766,16 +742,14 @@ function startAudioTransport({ fallback = true } = {}) {
       })
       .catch((error) => {
         if (isAutoplayBlocked(error)) return false;
-        if (isLiveTransport() && fallback) {
-          state.forceFileTransport = true;
+        if (fallback && forceNextAudioTransport()) {
           syncAudioSource();
           return startAudioTransport({ fallback: false });
         }
         return false;
       });
   } catch {
-    if (isLiveTransport() && fallback) {
-      state.forceFileTransport = true;
+    if (fallback && forceNextAudioTransport()) {
       syncAudioSource();
       return startAudioTransport({ fallback: false });
     }

@@ -18,6 +18,10 @@ const STATION_TRACK_SECONDS = 10;
 const MAX_STATION_TRACKS = 100;
 const SILENCE_CACHE = new Map();
 const LIVE_SAMPLE_RATE = 8000;
+const HLS_SEGMENT_SECONDS = 2;
+const HLS_WINDOW_SEGMENTS = 5;
+const HLS_SEGMENT_CACHE = new Map();
+const STREAM_PCM_CHUNK = createQuietPcm(1);
 const feedClients = new Set();
 
 function ensureStorage() {
@@ -41,6 +45,9 @@ const mimeTypes = new Map([
   [".svg", "image/svg+xml"],
   [".ico", "image/x-icon"],
   [".webmanifest", "application/manifest+json; charset=utf-8"],
+  [".m3u8", "application/vnd.apple.mpegurl; charset=utf-8"],
+  [".aac", "audio/aac"],
+  [".mp3", "audio/mpeg"],
   [".wav", "audio/wav"],
 ]);
 
@@ -97,6 +104,74 @@ function stationWav(trackCount) {
     SILENCE_CACHE.set(count, createQuietWav(count * STATION_TRACK_SECONDS));
   }
   return SILENCE_CACHE.get(count);
+}
+
+function hlsSegmentWav() {
+  if (!HLS_SEGMENT_CACHE.has("wav")) {
+    HLS_SEGMENT_CACHE.set("wav", createQuietWav(HLS_SEGMENT_SECONDS));
+  }
+  return HLS_SEGMENT_CACHE.get("wav");
+}
+
+function liveHlsPlaylist() {
+  const segmentMs = HLS_SEGMENT_SECONDS * 1000;
+  const newestSequence = Math.floor(Date.now() / segmentMs) - 1;
+  const firstSequence = Math.max(0, newestSequence - HLS_WINDOW_SEGMENTS + 1);
+  const lines = [
+    "#EXTM3U",
+    "#EXT-X-VERSION:3",
+    `#EXT-X-TARGETDURATION:${HLS_SEGMENT_SECONDS}`,
+    `#EXT-X-MEDIA-SEQUENCE:${firstSequence}`,
+  ];
+
+  for (let sequence = firstSequence; sequence < firstSequence + HLS_WINDOW_SEGMENTS; sequence += 1) {
+    lines.push(`#EXT-X-PROGRAM-DATE-TIME:${new Date(sequence * segmentMs).toISOString()}`);
+    lines.push(`#EXTINF:${HLS_SEGMENT_SECONDS.toFixed(3)},`);
+    lines.push(`/station-segment/${sequence}.wav`);
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function sendLiveHlsPlaylist(req, res) {
+  const playlist = liveHlsPlaylist();
+  res.writeHead(200, {
+    "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+    "Content-Length": Buffer.byteLength(playlist),
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
+  if (req.method === "HEAD") {
+    res.end();
+    return;
+  }
+  res.end(playlist);
+}
+
+function sendStationStream(req, res) {
+  res.writeHead(200, {
+    "Content-Type": "audio/wav",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
+
+  if (req.method === "HEAD") {
+    res.end();
+    return;
+  }
+
+  res.write(createWavHeader(0xffffffff));
+  res.write(STREAM_PCM_CHUNK);
+
+  const streamTimer = setInterval(() => {
+    if (!res.writableEnded) {
+      res.write(STREAM_PCM_CHUNK);
+    }
+  }, 1000);
+
+  const cleanup = () => clearInterval(streamTimer);
+  req.on("close", cleanup);
+  res.on("close", cleanup);
 }
 
 function readPosts() {
@@ -458,6 +533,29 @@ async function route(req, res) {
 
   if (url.pathname === "/api/events" && req.method === "GET") {
     return handleFeedEvents(req, res);
+  }
+
+  if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/station.m3u8") {
+    return sendLiveHlsPlaylist(req, res);
+  }
+
+  if ((req.method === "GET" || req.method === "HEAD") && /^\/station-segment\/\d+\.wav$/.test(url.pathname)) {
+    const stationAudio = hlsSegmentWav();
+    if (req.method === "HEAD") {
+      res.writeHead(200, {
+        "Content-Type": "audio/wav",
+        "Content-Length": stationAudio.length,
+        "Cache-Control": "public, max-age=30",
+        "X-Content-Type-Options": "nosniff",
+      });
+      res.end();
+      return;
+    }
+    return sendBuffer(res, 200, stationAudio, "audio/wav", "public, max-age=30");
+  }
+
+  if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/station-stream.wav") {
+    return sendStationStream(req, res);
   }
 
   if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/station-live.wav") {
