@@ -1,6 +1,10 @@
 :root {
   color-scheme: dark;
-  --bg: #221f27;
+  --bg: #6e5139;
+  --wallpaper:
+    radial-gradient(circle at 18% 7%, rgba(255, 190, 105, 0.3), transparent 32rem),
+    radial-gradient(circle at 86% 82%, rgba(105, 183, 198, 0.34), transparent 31rem),
+    linear-gradient(145deg, #8d6549 0%, #68454f 46%, #23383e 100%);
   --text: #fff9f1;
   --muted: rgba(255, 249, 241, 0.7);
   --faint: rgba(255, 249, 241, 0.48);
@@ -24,25 +28,31 @@ body {
   margin: 0;
 }
 
+html {
+  min-height: 100%;
+  background: var(--wallpaper), var(--bg);
+}
+
 body {
-  min-height: 100svh;
-  background:
-    radial-gradient(circle at 20% 10%, rgba(255, 180, 95, 0.35), transparent 32rem),
-    radial-gradient(circle at 84% 78%, rgba(110, 178, 196, 0.28), transparent 30rem),
-    linear-gradient(145deg, #6e5139 0%, #66434c 44%, #23323a 100%);
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: transparent;
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  overscroll-behavior: none;
 }
 
 body::before {
   content: "";
   position: fixed;
-  inset: 0;
+  inset: -2px;
+  z-index: 0;
   pointer-events: none;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 18%),
+    var(--wallpaper),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 18%),
     rgba(0, 0, 0, 0.08);
 }
 
@@ -71,7 +81,8 @@ svg {
   position: relative;
   z-index: 1;
   display: none;
-  min-height: 100svh;
+  min-height: 100vh;
+  min-height: 100dvh;
   padding: 0 18px calc(var(--safe-bottom) + 24px);
 }
 
@@ -210,19 +221,59 @@ button:disabled {
 
 .lock-header {
   position: relative;
-  min-height: calc(var(--safe-top) + 78px);
+  min-height: calc(var(--safe-top) + 70px);
   display: grid;
   place-items: end center;
-  padding: calc(var(--safe-top) + 10px) 0 12px;
+  padding: calc(var(--safe-top) + 8px) 0 10px;
 }
 
 .lock-header h1 {
-  font-family: "Comic Sans MS", "Comic Sans", "Marker Felt", "Chalkboard SE", cursive;
-  font-size: clamp(2.15rem, 9vw, 3.6rem);
+  font-family: "Chalkboard SE", "Comic Sans MS", "Comic Sans", cursive;
+  font-size: clamp(1.8rem, 7vw, 2.75rem);
+  font-weight: 700;
   line-height: 1;
   letter-spacing: 0;
   color: rgba(255, 249, 241, 0.96);
   text-shadow: 0 4px 24px rgba(0, 0, 0, 0.22);
+}
+
+.current-post-preview {
+  position: absolute;
+  left: 0;
+  bottom: 8px;
+  width: min(36%, 142px);
+  min-width: 84px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px 5px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  color: rgba(255, 249, 241, 0.88);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+}
+
+.current-post-preview img {
+  width: 38px;
+  aspect-ratio: 1 / 1;
+  border-radius: 999px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.current-post-preview span {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(255, 249, 241, 0.86);
+  font-size: 0.74rem;
+  font-weight: 760;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .debug-button {
@@ -506,8 +557,34 @@ button:disabled {
   }
 
   .lock-header {
-    min-height: calc(var(--safe-top) + 68px);
-    padding: calc(var(--safe-top) + 8px) 0 10px;
+    min-height: calc(var(--safe-top) + 62px);
+    padding: calc(var(--safe-top) + 6px) 0 9px;
+  }
+
+  .current-post-preview {
+    width: 42px;
+    min-width: 42px;
+    grid-template-columns: 32px;
+    gap: 0;
+    padding: 5px;
+  }
+
+  .current-post-preview img {
+    width: 32px;
+  }
+
+  .current-post-preview span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .debug-button {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 0.72rem;
   }
 
   .cover {

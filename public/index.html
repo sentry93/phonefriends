@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#8d6549" />
     <meta name="description" content="A shared photo station controlled like music playback." />
     <meta property="og:title" content="Phonefriends" />
     <meta property="og:description" content="Every friend is a track. Your photo is the cover." />
@@ -15,7 +15,7 @@
     <title>Phonefriends</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=7" />
+    <link rel="stylesheet" href="/styles.css?v=8" />
   </head>
   <body>
     <section class="screen is-active" id="nameScreen" aria-labelledby="nameTitle">
@@ -39,6 +39,10 @@
 
     <section class="screen app-screen" id="createScreen" aria-labelledby="createTitle">
       <header class="lock-header">
+        <div class="current-post-preview" id="currentPostPreview" hidden>
+          <img id="currentPostThumb" alt="" />
+          <span id="currentPostStatus"></span>
+        </div>
         <h1 id="createTitle">phonefriends</h1>
         <button class="debug-button" id="debugButton" type="button" hidden>debug</button>
       </header>
@@ -92,6 +96,6 @@
       </section>
     </div>
 
-    <script src="/app.js?v=7" defer></script>
+    <script src="/app.js?v=8" defer></script>
   </body>
 </html>

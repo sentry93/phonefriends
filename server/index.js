@@ -17,6 +17,8 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const STATION_TRACK_SECONDS = 10;
 const MAX_STATION_TRACKS = 100;
 const SILENCE_CACHE = new Map();
+const LIVE_SAMPLE_RATE = 8000;
+const LIVE_CHUNK_SECONDS = 1;
 
 function ensureStorage() {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -42,14 +44,13 @@ const mimeTypes = new Map([
   [".wav", "audio/wav"],
 ]);
 
-function createQuietWav(seconds = 1) {
-  const sampleRate = 8000;
-  const safeSeconds = Math.max(1, Math.floor(seconds));
-  const samples = sampleRate * safeSeconds;
-  const buffer = Buffer.alloc(44 + samples * 2);
+function createWavHeader(dataBytes, sampleRate = LIVE_SAMPLE_RATE) {
+  const safeDataBytes = Math.max(0, Math.min(Number(dataBytes) || 0, 0xffffffff));
+  const riffSize = safeDataBytes >= 0xffffffff - 36 ? 0xffffffff : 36 + safeDataBytes;
+  const buffer = Buffer.alloc(44);
 
   buffer.write("RIFF", 0);
-  buffer.writeUInt32LE(36 + samples * 2, 4);
+  buffer.writeUInt32LE(riffSize, 4);
   buffer.write("WAVE", 8);
   buffer.write("fmt ", 12);
   buffer.writeUInt32LE(16, 16);
@@ -60,14 +61,27 @@ function createQuietWav(seconds = 1) {
   buffer.writeUInt16LE(2, 32);
   buffer.writeUInt16LE(16, 34);
   buffer.write("data", 36);
-  buffer.writeUInt32LE(samples * 2, 40);
+  buffer.writeUInt32LE(safeDataBytes, 40);
+
+  return buffer;
+}
+
+function createQuietPcm(seconds = 1, sampleRate = LIVE_SAMPLE_RATE) {
+  const safeSeconds = Math.max(1, Math.floor(seconds));
+  const samples = sampleRate * safeSeconds;
+  const buffer = Buffer.alloc(samples * 2);
 
   for (let i = 0; i < samples; i += 1) {
     const sample = Math.round(Math.sin((2 * Math.PI * 220 * i) / sampleRate) * 3);
-    buffer.writeInt16LE(sample, 44 + i * 2);
+    buffer.writeInt16LE(sample, i * 2);
   }
 
   return buffer;
+}
+
+function createQuietWav(seconds = 1) {
+  const pcm = createQuietPcm(seconds);
+  return Buffer.concat([createWavHeader(pcm.length), pcm]);
 }
 
 function stationTrackCount(value) {
@@ -82,6 +96,35 @@ function stationWav(trackCount) {
     SILENCE_CACHE.set(count, createQuietWav(count * STATION_TRACK_SECONDS));
   }
   return SILENCE_CACHE.get(count);
+}
+
+function streamLiveStation(req, res) {
+  const header = createWavHeader(0xffffffff);
+  const chunk = createQuietPcm(LIVE_CHUNK_SECONDS);
+  let closed = false;
+
+  res.writeHead(200, {
+    "Content-Type": "audio/wav",
+    "Cache-Control": "no-store",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+    "X-Content-Type-Options": "nosniff",
+  });
+  res.write(header);
+  res.write(chunk);
+
+  const timer = setInterval(() => {
+    if (closed || res.destroyed) return;
+    res.write(chunk);
+  }, LIVE_CHUNK_SECONDS * 1000);
+
+  const close = () => {
+    closed = true;
+    clearInterval(timer);
+  };
+
+  req.on("close", close);
+  res.on("close", close);
 }
 
 function readPosts() {
@@ -340,6 +383,20 @@ async function route(req, res) {
 
   if (url.pathname === "/api/health") {
     return sendJson(res, 200, { ok: true });
+  }
+
+  if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/station-live.wav") {
+    if (req.method === "HEAD") {
+      res.writeHead(200, {
+        "Content-Type": "audio/wav",
+        "Cache-Control": "no-store",
+        "X-Accel-Buffering": "no",
+        "X-Content-Type-Options": "nosniff",
+      });
+      res.end();
+      return;
+    }
+    return streamLiveStation(req, res);
   }
 
   if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/silence.wav") {

@@ -7,7 +7,7 @@ const screens = {
   create: $("createScreen"),
 };
 
-const STATION_TRACK_SECONDS = 10;
+const STATION_LIVE_SRC = "/station-live.wav";
 
 const profile = {
   get id() {
@@ -43,7 +43,6 @@ const state = {
   playing: false,
   audio: null,
   audioEventsBound: false,
-  audioTrackCount: 0,
   refreshTimer: null,
   gesturePlaybackBound: false,
   mediaHandlersBound: false,
@@ -58,6 +57,7 @@ function showScreen(name) {
     updateDisplayName();
     updateDebugAccess();
     profile.wantsPlayback = true;
+    tryResumeStation({ silent: true });
     startCamera();
     loadFeed({ keepTrack: true });
     startFeedRefresh();
@@ -80,6 +80,22 @@ function updateNameButton() {
 
 function updateDisplayName() {
   $("displayNameLabel").textContent = profile.name || "you";
+}
+
+function updateCurrentPostPreview() {
+  const post = state.feed.find((item) => item.userId === profile.id);
+  const preview = $("currentPostPreview");
+
+  if (!post) {
+    preview.hidden = true;
+    $("currentPostThumb").removeAttribute("src");
+    $("currentPostStatus").textContent = "";
+    return;
+  }
+
+  $("currentPostThumb").src = artworkHref(post);
+  $("currentPostStatus").textContent = post.caption || "your photo";
+  preview.hidden = false;
 }
 
 function captureTimestampString(date = new Date()) {
@@ -283,7 +299,8 @@ async function loadFeed({ keepTrack = false, preferUserId = "" } = {}) {
     const keptIndex = currentUserId ? state.feed.findIndex((post) => post.userId === currentUserId) : -1;
     state.index = preferredIndex >= 0 ? preferredIndex : keptIndex >= 0 ? keptIndex : Math.min(state.index, Math.max(state.feed.length - 1, 0));
     preloadArtwork();
-    syncAudioSource({ preserveTrack: true });
+    syncAudioSource();
+    updateCurrentPostPreview();
     renderDebugList();
     renderTrack();
     setStatus("stationStatus", "");
@@ -296,14 +313,7 @@ async function loadFeed({ keepTrack = false, preferUserId = "" } = {}) {
 }
 
 function renderTrack() {
-  const empty = state.feed.length === 0;
   $("friendsButton").textContent = friendCountText(state.feed.length);
-
-  if (empty) {
-    clearMediaSession();
-    return;
-  }
-
   updateMediaSession();
 }
 
@@ -311,16 +321,8 @@ function friendCountText(count) {
   return `${count} ${count === 1 ? "friend" : "friends"}`;
 }
 
-function stationTrackCount() {
-  return Math.max(state.feed.length, 1);
-}
-
-function stationDuration() {
-  return stationTrackCount() * STATION_TRACK_SECONDS;
-}
-
 function stationAudioSrc() {
-  return `/silence.wav?tracks=${stationTrackCount()}`;
+  return STATION_LIVE_SRC;
 }
 
 function normalizedTrackIndex(index) {
@@ -328,63 +330,26 @@ function normalizedTrackIndex(index) {
   return (index + state.feed.length) % state.feed.length;
 }
 
-function trackStartTime(index) {
-  const safeIndex = normalizedTrackIndex(index);
-  return Math.min(safeIndex * STATION_TRACK_SECONDS + 0.05, Math.max(stationDuration() - 0.2, 0));
-}
-
-function setAudioToTrack(index) {
-  if (!state.audio || state.feed.length === 0) return;
-  try {
-    state.audio.currentTime = trackStartTime(index);
-  } catch {
-    /* Some browsers delay currentTime writes until metadata is loaded. */
-  }
-}
-
-function syncAudioSource({ preserveTrack = true } = {}) {
+function syncAudioSource() {
   if (!state.audio) return;
-
-  const trackCount = stationTrackCount();
-  if (state.audioTrackCount === trackCount && state.audio.src.endsWith(stationAudioSrc())) return;
-
+  if (state.audio.src.endsWith(stationAudioSrc())) return;
   const wasPlaying = state.playing && !state.audio.paused;
-  const preservedIndex = preserveTrack ? state.index : 0;
-  state.audioTrackCount = trackCount;
   state.audio.src = stationAudioSrc();
   state.audio.load();
-
-  const restorePosition = () => {
-    setAudioToTrack(preservedIndex);
-    if (wasPlaying) {
-      state.audio.play().catch(() => {});
-    }
-  };
-
-  if (state.audio.readyState >= 1) {
-    restorePosition();
-  } else {
-    state.audio.addEventListener("loadedmetadata", restorePosition, { once: true });
-  }
-}
-
-function syncTrackFromAudio() {
-  if (!state.audio || state.feed.length === 0) return;
-  const rawIndex = Math.floor(state.audio.currentTime / STATION_TRACK_SECONDS);
-  const nextIndex = normalizedTrackIndex(rawIndex);
-  if (nextIndex !== state.index) {
-    state.index = nextIndex;
-    renderTrack();
+  if (wasPlaying) {
+    state.audio.play().catch(() => {});
   }
 }
 
 function bindAudioEvents(audio) {
   if (state.audioEventsBound) return;
   state.audioEventsBound = true;
-  audio.addEventListener("timeupdate", syncTrackFromAudio);
-  audio.addEventListener("seeked", syncTrackFromAudio);
-  audio.addEventListener("loadedmetadata", () => {
-    setAudioToTrack(state.index);
+  audio.addEventListener("playing", () => {
+    state.playing = true;
+    updateMediaSession();
+  });
+  audio.addEventListener("pause", () => {
+    state.playing = false;
     updateMediaSession();
   });
 }
@@ -392,7 +357,6 @@ function bindAudioEvents(audio) {
 function goToTrack(index) {
   if (state.feed.length === 0) return;
   state.index = normalizedTrackIndex(index);
-  setAudioToTrack(state.index);
   renderTrack();
   keepTransportAlive();
 }
@@ -404,11 +368,9 @@ function advanceTrack(delta) {
 function getAudio() {
   if (state.audio) return state.audio;
   const audio = new Audio(stationAudioSrc());
-  audio.loop = true;
   audio.volume = 0.0001;
   audio.preload = "auto";
   state.audio = audio;
-  state.audioTrackCount = stationTrackCount();
   bindAudioEvents(audio);
   return audio;
 }
@@ -416,7 +378,8 @@ function getAudio() {
 async function startAudioTransport() {
   try {
     const audio = getAudio();
-    syncAudioSource({ preserveTrack: true });
+    syncAudioSource();
+    updateMediaSession();
     await audio.play();
     return true;
   } catch {
@@ -426,7 +389,7 @@ async function startAudioTransport() {
 
 function keepTransportAlive() {
   const audio = getAudio();
-  syncAudioSource({ preserveTrack: true });
+  syncAudioSource();
   if (state.playing) {
     audio.play().catch(() => {});
   }
@@ -434,11 +397,6 @@ function keepTransportAlive() {
 
 async function playStation({ silent = false } = {}) {
   profile.wantsPlayback = true;
-
-  if (state.feed.length === 0) {
-    if (!silent) setStatus("stationStatus", "Post a photo to start the station");
-    return;
-  }
 
   const started = await startAudioTransport();
   if (!started) {
@@ -474,16 +432,21 @@ function clearMediaSession() {
 }
 
 function updateMediaSession() {
-  if (!("mediaSession" in navigator) || state.feed.length === 0) return;
+  if (!("mediaSession" in navigator)) return;
   bindMediaSessionHandlers();
-  const track = state.feed[state.index];
+  const track = state.feed[state.index] || {
+    name: "Phonefriends",
+    caption: "Live station",
+    url: "/share-card.svg",
+    updatedAt: "",
+  };
   const artworkUrl = artworkHref(track);
   const artworkType = artworkMimeType(track.url);
 
   navigator.mediaSession.metadata = new MediaMetadata({
-    title: track.caption || "Untitled",
-    artist: track.name,
-    album: "Phonefriends",
+    title: track.caption || "Live station",
+    artist: track.name || "Phonefriends",
+    album: state.feed.length > 0 ? "Phonefriends live" : "Phonefriends",
     artwork: [
       { src: artworkUrl, sizes: "512x512", type: artworkType },
       { src: artworkUrl, sizes: "256x256", type: artworkType },
@@ -492,16 +455,6 @@ function updateMediaSession() {
     ],
   });
   navigator.mediaSession.playbackState = state.playing ? "playing" : "paused";
-  try {
-    const audioPosition = state.audio && Number.isFinite(state.audio.currentTime) ? state.audio.currentTime : trackStartTime(state.index);
-    navigator.mediaSession.setPositionState({
-      duration: stationDuration(),
-      playbackRate: 1,
-      position: Math.min(audioPosition, Math.max(stationDuration() - 0.1, 0)),
-    });
-  } catch {
-    /* Position state is optional and not supported by every Media Session implementation. */
-  }
 }
 
 function bindMediaSessionHandlers() {
@@ -511,17 +464,12 @@ function bindMediaSessionHandlers() {
   const actions = {
     play: () => playStation({ silent: true }),
     pause: pauseStation,
+    stop: pauseStation,
     nexttrack: () => advanceTrack(1),
     previoustrack: () => advanceTrack(-1),
     seekforward: () => advanceTrack(1),
     seekbackward: () => advanceTrack(-1),
-    seekto: (details) => {
-      if (typeof details.seekTime === "number") {
-        goToTrack(Math.floor(details.seekTime / STATION_TRACK_SECONDS));
-      } else {
-        advanceTrack(1);
-      }
-    },
+    seekto: () => advanceTrack(1),
   };
 
   Object.entries(actions).forEach(([action, handler]) => {
@@ -543,6 +491,7 @@ function artworkMimeType(url) {
   const lower = String(url).toLowerCase();
   if (lower.endsWith(".png")) return "image/png";
   if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".svg")) return "image/svg+xml";
   return "image/jpeg";
 }
 
@@ -673,7 +622,7 @@ function bindGesturePlayback() {
   state.gesturePlaybackBound = true;
 
   const handler = () => {
-    if (profile.wantsPlayback && state.feed.length > 0 && !state.playing) {
+    if (profile.wantsPlayback && !state.playing) {
       playStation({ silent: true });
     }
   };
@@ -693,6 +642,8 @@ function bindEvents() {
     const name = $("nameInput").value.trim();
     if (!name) return;
     profile.name = name;
+    profile.wantsPlayback = true;
+    playStation({ silent: true });
     showScreen("create");
     updateDisplayName();
     updateDebugAccess();
