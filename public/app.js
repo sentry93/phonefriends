@@ -40,11 +40,7 @@ const state = {
   playing: false,
   audio: null,
   refreshTimer: null,
-};
-
-const icons = {
-  play: '<path d="M8 5v14l11-7L8 5z"/>',
-  pause: '<path d="M6 5h4v14H6V5zm8 0h4v14h-4V5z"/>',
+  gesturePlaybackBound: false,
 };
 
 function showScreen(name) {
@@ -52,9 +48,12 @@ function showScreen(name) {
   screens[name].classList.add("is-active");
 
   if (name === "create") {
+    updateDisplayName();
+    profile.wantsPlayback = true;
     startCamera();
     loadFeed({ keepTrack: true });
     startFeedRefresh();
+    bindGesturePlayback();
   } else {
     stopCamera();
     stopFeedRefresh();
@@ -67,33 +66,19 @@ function setStatus(id, message, error = false) {
   element.classList.toggle("is-error", error);
 }
 
-function timeString() {
-  const now = new Date();
-  let hours = now.getHours();
-  const minutes = String(now.getMinutes()).padStart(2, "0");
-  const suffix = hours >= 12 ? "PM" : "AM";
-  hours = hours % 12 || 12;
-  return `${hours}:${minutes} ${suffix}`;
-}
-
-function updateClocks() {
-  $("captureClock").textContent = timeString();
-}
-
 function updateNameButton() {
   $("nameNext").disabled = !$("nameInput").value.trim();
 }
 
-function hideCapturePlaceholder(hidden) {
-  $("capturePlaceholder").hidden = hidden;
+function updateDisplayName() {
+  $("displayNameLabel").textContent = profile.name || "you";
 }
 
 async function startCamera() {
   if (state.capturedDataUrl || state.stream) return;
-  const placeholder = $("capturePlaceholderText");
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    placeholder.textContent = "Choose photo";
+    setStatus("createStatus", "Camera unavailable. Choose a photo instead.", true);
     return;
   }
 
@@ -108,11 +93,9 @@ async function startCamera() {
     });
     $("cameraPreview").srcObject = state.stream;
     $("cameraPreview").hidden = false;
-    hideCapturePlaceholder(true);
     setStatus("createStatus", "");
   } catch (error) {
-    placeholder.textContent = "Choose photo";
-    setStatus("createStatus", "Camera unavailable", true);
+    setStatus("createStatus", "Camera unavailable. Choose a photo instead.", true);
   }
 }
 
@@ -144,29 +127,6 @@ function drawCoverFromSource(source, mirrored = false) {
   context.drawImage(source, sx, sy, side, side, 0, 0, size, size);
   context.restore();
 
-  context.fillStyle = "rgba(0, 0, 0, 0.28)";
-  context.beginPath();
-  if (context.roundRect) {
-    context.roundRect(size / 2 - 104, 28, 208, 54, 27);
-  } else {
-    const x = size / 2 - 104;
-    const y = 28;
-    const width = 208;
-    const height = 54;
-    const radius = 27;
-    context.moveTo(x + radius, y);
-    context.arcTo(x + width, y, x + width, y + height, radius);
-    context.arcTo(x + width, y + height, x, y + height, radius);
-    context.arcTo(x, y + height, x, y, radius);
-    context.arcTo(x, y, x + width, y, radius);
-  }
-  context.fill();
-  context.fillStyle = "rgba(255, 255, 255, 0.95)";
-  context.font = "800 32px -apple-system, BlinkMacSystemFont, sans-serif";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.fillText(timeString(), size / 2, 56);
-
   return canvas.toDataURL("image/jpeg", 0.88);
 }
 
@@ -175,9 +135,9 @@ function setCaptured(dataUrl) {
   $("capturedPreview").src = dataUrl;
   $("capturedPreview").hidden = false;
   $("cameraPreview").hidden = true;
-  $("captureClock").hidden = true;
-  hideCapturePlaceholder(true);
   $("postButton").disabled = false;
+  $("postButton").hidden = false;
+  $("captureButton").hidden = true;
   $("retakeButton").disabled = false;
   stopCamera();
 }
@@ -199,12 +159,11 @@ function resetCapture() {
   state.capturedDataUrl = "";
   $("capturedPreview").hidden = true;
   $("capturedPreview").removeAttribute("src");
-  $("captureClock").hidden = false;
   $("postButton").disabled = true;
+  $("postButton").hidden = true;
+  $("captureButton").hidden = false;
   $("retakeButton").disabled = true;
   $("cameraPreview").hidden = false;
-  hideCapturePlaceholder(false);
-  $("capturePlaceholderText").textContent = "Camera";
   setStatus("createStatus", "");
   startCamera();
 }
@@ -247,7 +206,6 @@ async function postCapture() {
     await loadFeed({ keepTrack: false, preferUserId: profile.id });
     if (audioStarted) {
       state.playing = true;
-      setPlayingUi(true);
       updateMediaSession();
       setStatus("stationStatus", "Playing");
     } else {
@@ -260,7 +218,6 @@ async function postCapture() {
       state.audio.pause();
       state.playing = false;
       profile.wantsPlayback = false;
-      setPlayingUi(false);
     }
     setStatus("createStatus", error.message, true);
     $("postButton").disabled = false;
@@ -282,7 +239,7 @@ async function loadFeed({ keepTrack = false, preferUserId = "" } = {}) {
     renderTrack();
     setStatus("stationStatus", "");
     if (profile.wantsPlayback && state.feed.length > 0 && !state.playing) {
-      tryResumeStation();
+      tryResumeStation({ silent: true });
     }
   } catch (error) {
     setStatus("stationStatus", "Station unavailable", true);
@@ -291,29 +248,18 @@ async function loadFeed({ keepTrack = false, preferUserId = "" } = {}) {
 
 function renderTrack() {
   const empty = state.feed.length === 0;
-  $("stationPlaceholder").hidden = !empty;
-  $("stationImage").hidden = empty;
-  $("stationCount").textContent = `${state.feed.length} ${state.feed.length === 1 ? "track" : "tracks"}`;
-  $("stationPosition").textContent = empty ? "--" : `${state.index + 1} / ${state.feed.length}`;
-  $("previousButton").disabled = empty;
-  $("nextButton").disabled = empty;
-  $("playButton").disabled = empty;
+  $("friendsButton").textContent = friendCountText(state.feed.length);
 
   if (empty) {
-    $("trackTitle").textContent = "No track";
-    $("trackArtist").textContent = "Post a photo to start";
-    $("playButton").setAttribute("aria-label", "Start station");
-    $("playButton").title = "Start station";
     clearMediaSession();
     return;
   }
 
-  const track = state.feed[state.index];
-  $("stationImage").src = track.url;
-  $("stationImage").alt = `${track.name}'s station photo`;
-  $("trackTitle").textContent = track.caption || "Untitled";
-  $("trackArtist").textContent = track.name;
   updateMediaSession();
+}
+
+function friendCountText(count) {
+  return `${count} ${count === 1 ? "friend" : "friends"}`;
 }
 
 function goToTrack(index) {
@@ -341,41 +287,33 @@ async function startAudioTransport() {
   }
 }
 
-function setPlayingUi(playing) {
-  $("playIcon").innerHTML = playing ? icons.pause : icons.play;
-  $("playButton").setAttribute("aria-label", playing ? "Pause station" : "Start station");
-  $("playButton").title = playing ? "Pause station" : "Start station";
-}
-
-async function playStation() {
+async function playStation({ silent = false } = {}) {
   profile.wantsPlayback = true;
 
   if (state.feed.length === 0) {
-    setStatus("stationStatus", "Post a photo to start the station");
+    if (!silent) setStatus("stationStatus", "Post a photo to start the station");
     return;
   }
 
   const started = await startAudioTransport();
   if (!started) {
-    setStatus("stationStatus", "Tap play once before locking your phone", true);
+    if (!silent) setStatus("stationStatus", "Tap once before locking your phone", true);
     return;
   }
 
   state.playing = true;
-  setPlayingUi(true);
   updateMediaSession();
-  setStatus("stationStatus", "Playing");
+  if (!silent) setStatus("stationStatus", "Playing");
 }
 
-function tryResumeStation() {
-  playStation();
+function tryResumeStation(options) {
+  playStation(options);
 }
 
 function pauseStation() {
   if (state.audio) state.audio.pause();
   state.playing = false;
   profile.wantsPlayback = false;
-  setPlayingUi(false);
   updateMediaSession();
   setStatus("stationStatus", "Paused");
 }
@@ -458,6 +396,39 @@ async function shareStation() {
   }
 }
 
+function openShareModal() {
+  $("shareLinkText").textContent = location.origin;
+  $("shareModal").hidden = false;
+}
+
+function closeShareModal() {
+  $("shareModal").hidden = true;
+}
+
+async function copyShareLink() {
+  try {
+    await navigator.clipboard.writeText(location.origin);
+    setStatus("stationStatus", "Link copied");
+  } catch {
+    setStatus("stationStatus", "Copy unavailable", true);
+  }
+}
+
+function bindGesturePlayback() {
+  if (state.gesturePlaybackBound) return;
+  state.gesturePlaybackBound = true;
+
+  const handler = () => {
+    if (profile.wantsPlayback && state.feed.length > 0 && !state.playing) {
+      playStation({ silent: true });
+    }
+  };
+
+  document.addEventListener("pointerdown", handler, { passive: true });
+  document.addEventListener("touchstart", handler, { passive: true });
+  document.addEventListener("keydown", handler);
+}
+
 function bindEvents() {
   $("nameInput").value = profile.name;
   updateNameButton();
@@ -469,8 +440,9 @@ function bindEvents() {
     if (!name) return;
     profile.name = name;
     showScreen("create");
+    updateDisplayName();
     if (profile.wantsPlayback) {
-      tryResumeStation();
+      tryResumeStation({ silent: true });
     }
   });
 
@@ -479,21 +451,23 @@ function bindEvents() {
   $("postButton").addEventListener("click", postCapture);
   $("photoButton").addEventListener("click", () => $("photoInput").click());
   $("photoInput").addEventListener("change", (event) => loadPhotoFile(event.target.files[0]));
-  $("playButton").addEventListener("click", () => (state.playing ? pauseStation() : playStation()));
-  $("previousButton").addEventListener("click", () => goToTrack(state.index - 1));
-  $("nextButton").addEventListener("click", () => goToTrack(state.index + 1));
-  $("shareFromCreate").addEventListener("click", shareStation);
+  $("friendsButton").addEventListener("click", openShareModal);
+  $("closeShareModal").addEventListener("click", closeShareModal);
+  $("nativeShareButton").addEventListener("click", shareStation);
+  $("copyShareButton").addEventListener("click", copyShareLink);
+  $("shareModal").addEventListener("click", (event) => {
+    if (event.target === $("shareModal")) closeShareModal();
+  });
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && screens.create.classList.contains("is-active")) {
       loadFeed({ keepTrack: true });
+      playStation({ silent: true });
     }
   });
 }
 
 bindEvents();
-updateClocks();
-window.setInterval(updateClocks, 1000);
 
 if (profile.name) {
   showScreen("create");
