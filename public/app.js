@@ -8,6 +8,8 @@ const screens = {
 };
 
 const STATION_TRACK_SECONDS = 10;
+const LIVE_TRANSPORT = "live-stream";
+const FILE_TRANSPORT = "file";
 
 const profile = {
   get id() {
@@ -44,6 +46,13 @@ const state = {
   audio: null,
   audioEventsBound: false,
   audioTrackCount: 0,
+  audioTransportMode: "",
+  forceFileTransport: false,
+  liveAudioContext: null,
+  liveDestination: null,
+  liveOscillator: null,
+  liveGain: null,
+  trackAdvanceTimer: null,
   refreshTimer: null,
   gesturePlaybackBound: false,
   cameraZoomGesturesBound: false,
@@ -488,6 +497,71 @@ function stationAudioSrc() {
   return `/silence.wav?tracks=${stationTrackCount()}`;
 }
 
+function supportsLiveAudioTransport() {
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  const audio = document.createElement("audio");
+  return Boolean(
+    !state.forceFileTransport &&
+      AudioContextCtor &&
+      "srcObject" in audio &&
+      typeof AudioContextCtor.prototype.createMediaStreamDestination === "function",
+  );
+}
+
+function preferredTransportMode() {
+  return supportsLiveAudioTransport() ? LIVE_TRANSPORT : FILE_TRANSPORT;
+}
+
+function isLiveTransport() {
+  return state.audioTransportMode === LIVE_TRANSPORT;
+}
+
+function liveAudioContext() {
+  if (state.liveAudioContext) return state.liveAudioContext;
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) return null;
+  state.liveAudioContext = new AudioContextCtor();
+  return state.liveAudioContext;
+}
+
+function liveAudioStream() {
+  if (state.liveDestination) return state.liveDestination.stream;
+
+  const context = liveAudioContext();
+  if (!context || typeof context.createMediaStreamDestination !== "function") {
+    throw new Error("Live audio is unavailable");
+  }
+
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  const destination = context.createMediaStreamDestination();
+
+  oscillator.type = "sine";
+  oscillator.frequency.value = 120;
+  gain.gain.value = 0.0009;
+  oscillator.connect(gain);
+  gain.connect(destination);
+  oscillator.start();
+
+  state.liveOscillator = oscillator;
+  state.liveGain = gain;
+  state.liveDestination = destination;
+  return destination.stream;
+}
+
+function resumeLiveAudioContext() {
+  if (!isLiveTransport() || !state.liveAudioContext || state.liveAudioContext.state !== "suspended") {
+    return Promise.resolve();
+  }
+  return state.liveAudioContext.resume();
+}
+
+function isAutoplayBlocked(error) {
+  const name = error?.name || "";
+  const message = error?.message || "";
+  return name === "NotAllowedError" || name === "AbortError" || /gesture|interact|allowed|permission/i.test(message);
+}
+
 function normalizedTrackIndex(index) {
   if (state.feed.length === 0) return 0;
   return (index + state.feed.length) % state.feed.length;
@@ -499,7 +573,7 @@ function trackStartTime(index) {
 }
 
 function setAudioToTrack(index) {
-  if (!state.audio) return;
+  if (!state.audio || isLiveTransport()) return;
   try {
     state.audio.currentTime = trackStartTime(index);
   } catch {
@@ -510,12 +584,45 @@ function setAudioToTrack(index) {
 function syncAudioSource({ preserveTrack = true } = {}) {
   if (!state.audio) return;
   const nextTrackCount = stationTrackCount();
-  if (state.audioTrackCount === nextTrackCount && state.audio.src.endsWith(stationAudioSrc())) return;
+  const nextMode = preferredTransportMode();
+  const preservedIndex = preserveTrack ? state.index : 0;
+
+  if (nextMode === LIVE_TRANSPORT) {
+    if (
+      state.audioTrackCount === nextTrackCount &&
+      state.audioTransportMode === LIVE_TRANSPORT &&
+      state.audio.srcObject === state.liveDestination?.stream
+    ) {
+      return;
+    }
+
+    const wasPlaying = state.playing && !state.audio.paused;
+    state.audioTrackCount = nextTrackCount;
+    state.audioTransportMode = LIVE_TRANSPORT;
+    try {
+      state.audio.removeAttribute("src");
+      state.audio.srcObject = liveAudioStream();
+      state.audio.loop = false;
+    } catch {
+      state.forceFileTransport = true;
+      syncAudioSource({ preserveTrack });
+      return;
+    }
+    if (wasPlaying) {
+      startAudioTransport({ fallback: false });
+    }
+    return;
+  }
+
+  const nextSrc = stationAudioSrc();
+  if (state.audioTrackCount === nextTrackCount && state.audioTransportMode === FILE_TRANSPORT && state.audio.src.endsWith(nextSrc)) return;
 
   const wasPlaying = state.playing && !state.audio.paused;
-  const preservedIndex = preserveTrack ? state.index : 0;
   state.audioTrackCount = nextTrackCount;
-  state.audio.src = stationAudioSrc();
+  state.audioTransportMode = FILE_TRANSPORT;
+  state.audio.srcObject = null;
+  state.audio.src = nextSrc;
+  state.audio.loop = true;
   state.audio.load();
 
   const restore = () => {
@@ -533,7 +640,7 @@ function syncAudioSource({ preserveTrack = true } = {}) {
 }
 
 function syncTrackFromAudio() {
-  if (!state.audio || state.feed.length === 0) return;
+  if (!state.audio || isLiveTransport() || state.feed.length === 0) return;
   const nextIndex = normalizedTrackIndex(Math.floor(state.audio.currentTime / STATION_TRACK_SECONDS));
   if (nextIndex !== state.index) {
     state.index = nextIndex;
@@ -547,15 +654,17 @@ function bindAudioEvents(audio) {
   audio.addEventListener("timeupdate", syncTrackFromAudio);
   audio.addEventListener("seeked", syncTrackFromAudio);
   audio.addEventListener("loadedmetadata", () => {
-    setAudioToTrack(state.index);
+    if (!isLiveTransport()) setAudioToTrack(state.index);
     updateMediaSession();
   });
   audio.addEventListener("playing", () => {
     state.playing = true;
+    startTrackAdvanceClock();
     updateMediaSession();
   });
   audio.addEventListener("pause", () => {
     state.playing = false;
+    stopTrackAdvanceClock();
     updateMediaSession();
   });
 }
@@ -563,7 +672,7 @@ function bindAudioEvents(audio) {
 function goToTrack(index) {
   if (state.feed.length === 0) return;
   state.index = normalizedTrackIndex(index);
-  setAudioToTrack(state.index);
+  if (!isLiveTransport()) setAudioToTrack(state.index);
   renderTrack();
   keepTransportAlive();
 }
@@ -572,29 +681,71 @@ function advanceTrack(delta) {
   goToTrack(state.index + delta);
 }
 
+function startTrackAdvanceClock() {
+  if (!isLiveTransport() || state.feed.length <= 1) {
+    stopTrackAdvanceClock();
+    return;
+  }
+  if (state.trackAdvanceTimer) return;
+  state.trackAdvanceTimer = window.setInterval(() => {
+    if (!state.playing || !isLiveTransport() || state.feed.length <= 1) return;
+    advanceTrack(1);
+  }, STATION_TRACK_SECONDS * 1000);
+}
+
+function stopTrackAdvanceClock() {
+  if (!state.trackAdvanceTimer) return;
+  window.clearInterval(state.trackAdvanceTimer);
+  state.trackAdvanceTimer = null;
+}
+
 function getAudio() {
   if (state.audio) return state.audio;
-  const audio = new Audio(stationAudioSrc());
-  audio.loop = true;
+  const audio = new Audio();
   audio.volume = 1;
   audio.muted = false;
   audio.preload = "auto";
+  audio.playsInline = true;
+  audio.setAttribute("playsinline", "");
+  audio.setAttribute("webkit-playsinline", "");
   state.audio = audio;
-  state.audioTrackCount = stationTrackCount();
   bindAudioEvents(audio);
+  syncAudioSource();
   return audio;
 }
 
-async function startAudioTransport() {
+function startAudioTransport({ fallback = true } = {}) {
   try {
     const audio = getAudio();
     syncAudioSource();
-    setAudioToTrack(state.index);
+    if (!isLiveTransport()) setAudioToTrack(state.index);
     updateMediaSession();
-    await audio.play();
-    return true;
+
+    const resumePromise = resumeLiveAudioContext();
+    const playResult = audio.play();
+    return Promise.all([Promise.resolve(resumePromise), Promise.resolve(playResult)])
+      .then(() => {
+        state.playing = true;
+        startTrackAdvanceClock();
+        updateMediaSession();
+        return true;
+      })
+      .catch((error) => {
+        if (isAutoplayBlocked(error)) return false;
+        if (isLiveTransport() && fallback) {
+          state.forceFileTransport = true;
+          syncAudioSource();
+          return startAudioTransport({ fallback: false });
+        }
+        return false;
+      });
   } catch {
-    return false;
+    if (isLiveTransport() && fallback) {
+      state.forceFileTransport = true;
+      syncAudioSource();
+      return startAudioTransport({ fallback: false });
+    }
+    return Promise.resolve(false);
   }
 }
 
@@ -612,14 +763,22 @@ function claimStationPlayback({ silent = true, force = false } = {}) {
     return;
   }
   if (!force && shouldThrottlePlaybackAttempt()) return;
-  playStation({ silent });
+  startAudioTransport().then((started) => {
+    if (!started) {
+      if (!silent) setStatus("stationStatus", "Tap once before locking your phone", true);
+      return;
+    }
+    state.playing = true;
+    updateMediaSession();
+    if (!silent) setStatus("stationStatus", "Playing");
+  });
 }
 
 function keepTransportAlive() {
-  const audio = getAudio();
+  getAudio();
   syncAudioSource();
   if (state.playing) {
-    audio.play().catch(() => {});
+    startAudioTransport({ fallback: true });
   }
 }
 
@@ -645,6 +804,7 @@ function pauseStation() {
   if (state.audio) state.audio.pause();
   state.playing = false;
   profile.wantsPlayback = false;
+  stopTrackAdvanceClock();
   updateMediaSession();
   setStatus("stationStatus", "Paused");
 }
@@ -702,9 +862,6 @@ function bindMediaSessionHandlers() {
     stop: pauseStation,
     nexttrack: () => advanceTrack(1),
     previoustrack: () => advanceTrack(-1),
-    seekforward: () => advanceTrack(1),
-    seekbackward: () => advanceTrack(-1),
-    seekto: () => advanceTrack(1),
   };
 
   Object.entries(actions).forEach(([action, handler]) => {
@@ -712,6 +869,14 @@ function bindMediaSessionHandlers() {
       navigator.mediaSession.setActionHandler(action, handler);
     } catch {
       /* Some browsers expose Media Session but not every action. */
+    }
+  });
+
+  ["seekforward", "seekbackward", "seekto"].forEach((action) => {
+    try {
+      navigator.mediaSession.setActionHandler(action, null);
+    } catch {
+      /* Optional action cleanup is best-effort. */
     }
   });
 }
