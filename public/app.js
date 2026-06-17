@@ -45,9 +45,16 @@ const state = {
   audioEventsBound: false,
   refreshTimer: null,
   gesturePlaybackBound: false,
+  cameraZoomGesturesBound: false,
   mediaHandlersBound: false,
   artworkPreload: new Map(),
   lastPlaybackAttempt: 0,
+  cameraZoom: 1,
+  cameraZoomBounds: { min: 1, max: 3, step: 0.01, hardware: false },
+  cameraZoomUsesHardware: false,
+  cameraZoomApplyTimer: null,
+  lastCameraZoomApply: 0,
+  pinchZoom: null,
 };
 
 function showScreen(name) {
@@ -103,6 +110,130 @@ function captureTimestampString(date = new Date()) {
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function getVideoTrack() {
+  return state.stream?.getVideoTracks?.()[0] || null;
+}
+
+function readCameraZoomBounds() {
+  const track = getVideoTrack();
+  const capabilities = track?.getCapabilities?.();
+  const zoom = capabilities?.zoom;
+
+  if (zoom && Number.isFinite(zoom.max) && zoom.max > 1) {
+    return {
+      min: Number.isFinite(zoom.min) ? zoom.min : 1,
+      max: zoom.max,
+      step: Number.isFinite(zoom.step) && zoom.step > 0 ? zoom.step : 0.01,
+      hardware: true,
+    };
+  }
+
+  return { min: 1, max: 3, step: 0.01, hardware: false };
+}
+
+function updateCameraPreviewZoom() {
+  const preview = $("cameraPreview");
+  const visualZoom = state.cameraZoomUsesHardware ? 1 : state.cameraZoom;
+  preview.style.setProperty("--preview-zoom", String(visualZoom));
+}
+
+function applyHardwareCameraZoom(immediate = false) {
+  if (!state.cameraZoomBounds.hardware) return;
+
+  const track = getVideoTrack();
+  if (!track?.applyConstraints) return;
+
+  const apply = () => {
+    state.cameraZoomApplyTimer = null;
+    state.lastCameraZoomApply = Date.now();
+    track.applyConstraints({ advanced: [{ zoom: state.cameraZoom }] })
+      .then(() => {
+        state.cameraZoomUsesHardware = true;
+        updateCameraPreviewZoom();
+      })
+      .catch(() => {
+        state.cameraZoomUsesHardware = false;
+        state.cameraZoomBounds = {
+          ...state.cameraZoomBounds,
+          min: 1,
+          max: Math.max(3, state.cameraZoomBounds.max),
+          hardware: false,
+        };
+        updateCameraPreviewZoom();
+      });
+  };
+
+  if (state.cameraZoomApplyTimer) {
+    window.clearTimeout(state.cameraZoomApplyTimer);
+    state.cameraZoomApplyTimer = null;
+  }
+
+  const elapsed = Date.now() - state.lastCameraZoomApply;
+  if (immediate || elapsed > 55) {
+    apply();
+  } else {
+    state.cameraZoomApplyTimer = window.setTimeout(apply, 55 - elapsed);
+  }
+}
+
+function setCameraZoom(value, { immediate = false } = {}) {
+  const bounds = state.cameraZoomBounds;
+  const stepped = bounds.min + Math.round((value - bounds.min) / bounds.step) * bounds.step;
+  state.cameraZoom = clamp(stepped, bounds.min, bounds.max);
+  updateCameraPreviewZoom();
+  applyHardwareCameraZoom(immediate);
+}
+
+function syncCameraZoomCapabilities() {
+  state.cameraZoomBounds = readCameraZoomBounds();
+  state.cameraZoomUsesHardware = false;
+  setCameraZoom(state.cameraZoom, { immediate: true });
+}
+
+function cameraCaptureZoom() {
+  return state.cameraZoomUsesHardware ? 1 : state.cameraZoom;
+}
+
+function touchDistance(touches) {
+  const [first, second] = touches;
+  return Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
+}
+
+function bindCameraZoomGestures() {
+  if (state.cameraZoomGesturesBound) return;
+  state.cameraZoomGesturesBound = true;
+
+  const cover = $("captureCover");
+
+  cover.addEventListener("touchstart", (event) => {
+    if (event.touches.length !== 2 || state.capturedDataUrl) return;
+    state.pinchZoom = {
+      distance: touchDistance(event.touches),
+      zoom: state.cameraZoom,
+    };
+    event.preventDefault();
+  }, { passive: false });
+
+  cover.addEventListener("touchmove", (event) => {
+    if (!state.pinchZoom || event.touches.length !== 2 || state.capturedDataUrl) return;
+    const distance = touchDistance(event.touches);
+    if (!distance || !state.pinchZoom.distance) return;
+    setCameraZoom(state.pinchZoom.zoom * (distance / state.pinchZoom.distance));
+    event.preventDefault();
+  }, { passive: false });
+
+  const endPinch = (event) => {
+    if (event.touches.length < 2) state.pinchZoom = null;
+  };
+
+  cover.addEventListener("touchend", endPinch, { passive: true });
+  cover.addEventListener("touchcancel", endPinch, { passive: true });
+}
+
 async function startCamera() {
   if (state.capturedDataUrl || state.stream) return;
 
@@ -124,6 +255,7 @@ async function startCamera() {
       audio: false,
     });
     preview.srcObject = state.stream;
+    syncCameraZoomCapabilities();
     preview.hidden = false;
     $("flipCameraButton").disabled = false;
     setStatus("createStatus", "");
@@ -135,12 +267,18 @@ async function startCamera() {
 
 function stopCamera() {
   if (!state.stream) return;
+  if (state.cameraZoomApplyTimer) {
+    window.clearTimeout(state.cameraZoomApplyTimer);
+    state.cameraZoomApplyTimer = null;
+  }
+  state.pinchZoom = null;
   state.stream.getTracks().forEach((track) => track.stop());
   state.stream = null;
+  state.cameraZoomUsesHardware = false;
   $("cameraPreview").srcObject = null;
 }
 
-function drawCoverFromSource(source, mirrored = false) {
+function drawCoverFromSource(source, mirrored = false, zoom = 1) {
   const canvas = $("captureCanvas");
   const size = 1200;
   canvas.width = size;
@@ -148,7 +286,8 @@ function drawCoverFromSource(source, mirrored = false) {
   const context = canvas.getContext("2d");
   const sourceWidth = source.videoWidth || source.naturalWidth || source.width;
   const sourceHeight = source.videoHeight || source.naturalHeight || source.height;
-  const side = Math.min(sourceWidth, sourceHeight);
+  const cropZoom = Math.max(1, Number(zoom) || 1);
+  const side = Math.min(sourceWidth, sourceHeight) / cropZoom;
   const sx = (sourceWidth - side) / 2;
   const sy = (sourceHeight - side) / 2;
 
@@ -203,7 +342,7 @@ function captureCameraFrame() {
     setStatus("createStatus", "Camera is warming up");
     return;
   }
-  setCaptured(drawCoverFromSource(video, state.facingMode === "user"));
+  setCaptured(drawCoverFromSource(video, state.facingMode === "user", cameraCaptureZoom()));
 }
 
 function resetCapture() {
@@ -314,12 +453,30 @@ async function loadFeed({ keepTrack = false, preferUserId = "" } = {}) {
 }
 
 function renderTrack() {
-  $("friendsButton").textContent = friendCountText(state.feed.length);
+  renderFriendsButton(state.feed.length);
   updateMediaSession();
 }
 
 function friendCountText(count) {
-  return `${count} ${count === 1 ? "friend" : "friends"}`;
+  return `To ${count} ${count === 1 ? "Friend" : "Friends"}`;
+}
+
+function renderFriendsButton(count) {
+  const button = $("friendsButton");
+  const label = document.createElement("span");
+  label.textContent = friendCountText(count);
+
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.classList.add("line-icon");
+  icon.setAttribute("viewBox", "0 0 24 24");
+  icon.setAttribute("aria-hidden", "true");
+
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "m9 5 7 7-7 7");
+  icon.append(path);
+
+  button.replaceChildren(label, icon);
+  button.setAttribute("aria-label", `Share station with ${count} ${count === 1 ? "friend" : "friends"}`);
 }
 
 function stationAudioSrc() {
@@ -696,10 +853,13 @@ function bindEvents() {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeDebugPanel();
   });
+
+  bindCameraZoomGestures();
 }
 
 bindEvents();
 bindGesturePlayback();
+renderTrack();
 
 if (profile.name) {
   showScreen("create");
