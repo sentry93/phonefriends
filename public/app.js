@@ -7,7 +7,7 @@ const screens = {
   create: $("createScreen"),
 };
 
-const STATION_LIVE_SRC = "/station-live.wav";
+const STATION_TRACK_SECONDS = 10;
 
 const profile = {
   get id() {
@@ -43,6 +43,7 @@ const state = {
   playing: false,
   audio: null,
   audioEventsBound: false,
+  audioTrackCount: 0,
   refreshTimer: null,
   gesturePlaybackBound: false,
   cameraZoomGesturesBound: false,
@@ -479,8 +480,12 @@ function renderFriendsButton(count) {
   button.setAttribute("aria-label", `Share station with ${count} ${count === 1 ? "friend" : "friends"}`);
 }
 
+function stationTrackCount() {
+  return Math.max(state.feed.length, 1);
+}
+
 function stationAudioSrc() {
-  return STATION_LIVE_SRC;
+  return `/silence.wav?tracks=${stationTrackCount()}`;
 }
 
 function normalizedTrackIndex(index) {
@@ -488,20 +493,63 @@ function normalizedTrackIndex(index) {
   return (index + state.feed.length) % state.feed.length;
 }
 
-function syncAudioSource() {
+function trackStartTime(index) {
+  if (state.feed.length === 0) return 0.05;
+  return Math.min(normalizedTrackIndex(index) * STATION_TRACK_SECONDS + 0.05, Math.max(stationTrackCount() * STATION_TRACK_SECONDS - 0.2, 0));
+}
+
+function setAudioToTrack(index) {
   if (!state.audio) return;
-  if (state.audio.src.endsWith(stationAudioSrc())) return;
+  try {
+    state.audio.currentTime = trackStartTime(index);
+  } catch {
+    /* Safari may defer seeking until metadata is loaded. */
+  }
+}
+
+function syncAudioSource({ preserveTrack = true } = {}) {
+  if (!state.audio) return;
+  const nextTrackCount = stationTrackCount();
+  if (state.audioTrackCount === nextTrackCount && state.audio.src.endsWith(stationAudioSrc())) return;
+
   const wasPlaying = state.playing && !state.audio.paused;
+  const preservedIndex = preserveTrack ? state.index : 0;
+  state.audioTrackCount = nextTrackCount;
   state.audio.src = stationAudioSrc();
   state.audio.load();
-  if (wasPlaying) {
-    state.audio.play().catch(() => {});
+
+  const restore = () => {
+    setAudioToTrack(preservedIndex);
+    if (wasPlaying) {
+      state.audio.play().catch(() => {});
+    }
+  };
+
+  if (state.audio.readyState >= 1) {
+    restore();
+  } else {
+    state.audio.addEventListener("loadedmetadata", restore, { once: true });
+  }
+}
+
+function syncTrackFromAudio() {
+  if (!state.audio || state.feed.length === 0) return;
+  const nextIndex = normalizedTrackIndex(Math.floor(state.audio.currentTime / STATION_TRACK_SECONDS));
+  if (nextIndex !== state.index) {
+    state.index = nextIndex;
+    renderTrack();
   }
 }
 
 function bindAudioEvents(audio) {
   if (state.audioEventsBound) return;
   state.audioEventsBound = true;
+  audio.addEventListener("timeupdate", syncTrackFromAudio);
+  audio.addEventListener("seeked", syncTrackFromAudio);
+  audio.addEventListener("loadedmetadata", () => {
+    setAudioToTrack(state.index);
+    updateMediaSession();
+  });
   audio.addEventListener("playing", () => {
     state.playing = true;
     updateMediaSession();
@@ -515,6 +563,7 @@ function bindAudioEvents(audio) {
 function goToTrack(index) {
   if (state.feed.length === 0) return;
   state.index = normalizedTrackIndex(index);
+  setAudioToTrack(state.index);
   renderTrack();
   keepTransportAlive();
 }
@@ -526,10 +575,12 @@ function advanceTrack(delta) {
 function getAudio() {
   if (state.audio) return state.audio;
   const audio = new Audio(stationAudioSrc());
+  audio.loop = true;
   audio.volume = 1;
   audio.muted = false;
   audio.preload = "auto";
   state.audio = audio;
+  state.audioTrackCount = stationTrackCount();
   bindAudioEvents(audio);
   return audio;
 }
@@ -538,6 +589,7 @@ async function startAudioTransport() {
   try {
     const audio = getAudio();
     syncAudioSource();
+    setAudioToTrack(state.index);
     updateMediaSession();
     await audio.play();
     return true;
@@ -613,24 +665,31 @@ function updateMediaSession() {
   const track = state.feed[state.index] || {
     name: "Phonefriends",
     caption: "Live station",
-    url: "/share-card.svg",
+    url: "",
     updatedAt: "",
   };
-  const artworkUrl = artworkHref(track);
-  const artworkType = artworkMimeType(track.url);
+  const artworkUrl = track.url ? artworkHref(track) : "";
+  const artworkType = track.url ? artworkMimeType(track.url) : "";
+  const artwork = artworkUrl && artworkType !== "image/svg+xml"
+    ? [
+        { src: artworkUrl, sizes: "512x512", type: artworkType },
+        { src: artworkUrl, sizes: "256x256", type: artworkType },
+        { src: artworkUrl, sizes: "192x192", type: artworkType },
+        { src: artworkUrl, sizes: "96x96", type: artworkType },
+      ]
+    : [];
 
-  navigator.mediaSession.metadata = new MediaMetadata({
-    title: track.caption || "Live station",
-    artist: track.name || "Phonefriends",
-    album: state.feed.length > 0 ? "Phonefriends live" : "Phonefriends",
-    artwork: [
-      { src: artworkUrl, sizes: "512x512", type: artworkType },
-      { src: artworkUrl, sizes: "256x256", type: artworkType },
-      { src: artworkUrl, sizes: "192x192", type: artworkType },
-      { src: artworkUrl, sizes: "96x96", type: artworkType },
-    ],
-  });
-  navigator.mediaSession.playbackState = state.playing ? "playing" : "paused";
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.caption || "Live station",
+      artist: track.name || "Phonefriends",
+      album: state.feed.length > 0 ? "Phonefriends live" : "Phonefriends",
+      artwork,
+    });
+    navigator.mediaSession.playbackState = state.playing ? "playing" : "paused";
+  } catch {
+    /* Media Session metadata should never prevent the audio transport from starting. */
+  }
 }
 
 function bindMediaSessionHandlers() {

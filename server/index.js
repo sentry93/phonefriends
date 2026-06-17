@@ -18,7 +18,6 @@ const STATION_TRACK_SECONDS = 10;
 const MAX_STATION_TRACKS = 100;
 const SILENCE_CACHE = new Map();
 const LIVE_SAMPLE_RATE = 8000;
-const LIVE_CHUNK_SECONDS = 1;
 
 function ensureStorage() {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -97,35 +96,6 @@ function stationWav(trackCount) {
     SILENCE_CACHE.set(count, createQuietWav(count * STATION_TRACK_SECONDS));
   }
   return SILENCE_CACHE.get(count);
-}
-
-function streamLiveStation(req, res) {
-  const header = createWavHeader(0xffffffff);
-  const chunk = createQuietPcm(LIVE_CHUNK_SECONDS);
-  let closed = false;
-
-  res.writeHead(200, {
-    "Content-Type": "audio/wav",
-    "Cache-Control": "no-store",
-    "Connection": "keep-alive",
-    "X-Accel-Buffering": "no",
-    "X-Content-Type-Options": "nosniff",
-  });
-  res.write(header);
-  res.write(chunk);
-
-  const timer = setInterval(() => {
-    if (closed || res.destroyed) return;
-    res.write(chunk);
-  }, LIVE_CHUNK_SECONDS * 1000);
-
-  const close = () => {
-    closed = true;
-    clearInterval(timer);
-  };
-
-  req.on("close", close);
-  res.on("close", close);
 }
 
 function readPosts() {
@@ -387,17 +357,18 @@ async function route(req, res) {
   }
 
   if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/station-live.wav") {
+    const stationAudio = stationWav(url.searchParams.get("tracks"));
     if (req.method === "HEAD") {
       res.writeHead(200, {
         "Content-Type": "audio/wav",
+        "Content-Length": stationAudio.length,
         "Cache-Control": "no-store",
-        "X-Accel-Buffering": "no",
         "X-Content-Type-Options": "nosniff",
       });
       res.end();
       return;
     }
-    return streamLiveStation(req, res);
+    return sendBuffer(res, 200, stationAudio, "audio/wav", "no-store");
   }
 
   if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/silence.wav") {
