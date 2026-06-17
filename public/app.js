@@ -7,6 +7,8 @@ const screens = {
   create: $("createScreen"),
 };
 
+const STATION_TRACK_SECONDS = 10;
+
 const profile = {
   get id() {
     let value = localStorage.getItem("phonefriends_user_id");
@@ -40,6 +42,8 @@ const state = {
   index: 0,
   playing: false,
   audio: null,
+  audioEventsBound: false,
+  audioTrackCount: 0,
   refreshTimer: null,
   gesturePlaybackBound: false,
   mediaHandlersBound: false,
@@ -279,6 +283,7 @@ async function loadFeed({ keepTrack = false, preferUserId = "" } = {}) {
     const keptIndex = currentUserId ? state.feed.findIndex((post) => post.userId === currentUserId) : -1;
     state.index = preferredIndex >= 0 ? preferredIndex : keptIndex >= 0 ? keptIndex : Math.min(state.index, Math.max(state.feed.length - 1, 0));
     preloadArtwork();
+    syncAudioSource({ preserveTrack: true });
     renderDebugList();
     renderTrack();
     setStatus("stationStatus", "");
@@ -306,9 +311,88 @@ function friendCountText(count) {
   return `${count} ${count === 1 ? "friend" : "friends"}`;
 }
 
+function stationTrackCount() {
+  return Math.max(state.feed.length, 1);
+}
+
+function stationDuration() {
+  return stationTrackCount() * STATION_TRACK_SECONDS;
+}
+
+function stationAudioSrc() {
+  return `/silence.wav?tracks=${stationTrackCount()}`;
+}
+
+function normalizedTrackIndex(index) {
+  if (state.feed.length === 0) return 0;
+  return (index + state.feed.length) % state.feed.length;
+}
+
+function trackStartTime(index) {
+  const safeIndex = normalizedTrackIndex(index);
+  return Math.min(safeIndex * STATION_TRACK_SECONDS + 0.05, Math.max(stationDuration() - 0.2, 0));
+}
+
+function setAudioToTrack(index) {
+  if (!state.audio || state.feed.length === 0) return;
+  try {
+    state.audio.currentTime = trackStartTime(index);
+  } catch {
+    /* Some browsers delay currentTime writes until metadata is loaded. */
+  }
+}
+
+function syncAudioSource({ preserveTrack = true } = {}) {
+  if (!state.audio) return;
+
+  const trackCount = stationTrackCount();
+  if (state.audioTrackCount === trackCount && state.audio.src.endsWith(stationAudioSrc())) return;
+
+  const wasPlaying = state.playing && !state.audio.paused;
+  const preservedIndex = preserveTrack ? state.index : 0;
+  state.audioTrackCount = trackCount;
+  state.audio.src = stationAudioSrc();
+  state.audio.load();
+
+  const restorePosition = () => {
+    setAudioToTrack(preservedIndex);
+    if (wasPlaying) {
+      state.audio.play().catch(() => {});
+    }
+  };
+
+  if (state.audio.readyState >= 1) {
+    restorePosition();
+  } else {
+    state.audio.addEventListener("loadedmetadata", restorePosition, { once: true });
+  }
+}
+
+function syncTrackFromAudio() {
+  if (!state.audio || state.feed.length === 0) return;
+  const rawIndex = Math.floor(state.audio.currentTime / STATION_TRACK_SECONDS);
+  const nextIndex = normalizedTrackIndex(rawIndex);
+  if (nextIndex !== state.index) {
+    state.index = nextIndex;
+    renderTrack();
+  }
+}
+
+function bindAudioEvents(audio) {
+  if (state.audioEventsBound) return;
+  state.audioEventsBound = true;
+  audio.addEventListener("timeupdate", syncTrackFromAudio);
+  audio.addEventListener("seeked", syncTrackFromAudio);
+  audio.addEventListener("loadedmetadata", () => {
+    setAudioToTrack(state.index);
+    updateMediaSession();
+  });
+}
+
 function goToTrack(index) {
   if (state.feed.length === 0) return;
-  state.index = (index + state.feed.length) % state.feed.length;
+  state.index = normalizedTrackIndex(index);
+  setAudioToTrack(state.index);
   renderTrack();
   keepTransportAlive();
 }
@@ -319,17 +403,21 @@ function advanceTrack(delta) {
 
 function getAudio() {
   if (state.audio) return state.audio;
-  const audio = new Audio("/silence.wav");
+  const audio = new Audio(stationAudioSrc());
   audio.loop = true;
   audio.volume = 0.0001;
   audio.preload = "auto";
   state.audio = audio;
+  state.audioTrackCount = stationTrackCount();
+  bindAudioEvents(audio);
   return audio;
 }
 
 async function startAudioTransport() {
   try {
-    await getAudio().play();
+    const audio = getAudio();
+    syncAudioSource({ preserveTrack: true });
+    await audio.play();
     return true;
   } catch {
     return false;
@@ -338,11 +426,7 @@ async function startAudioTransport() {
 
 function keepTransportAlive() {
   const audio = getAudio();
-  try {
-    audio.currentTime = 0;
-  } catch {
-    /* Some browsers disallow currentTime writes during metadata changes. */
-  }
+  syncAudioSource({ preserveTrack: true });
   if (state.playing) {
     audio.play().catch(() => {});
   }
@@ -409,10 +493,11 @@ function updateMediaSession() {
   });
   navigator.mediaSession.playbackState = state.playing ? "playing" : "paused";
   try {
+    const audioPosition = state.audio && Number.isFinite(state.audio.currentTime) ? state.audio.currentTime : trackStartTime(state.index);
     navigator.mediaSession.setPositionState({
-      duration: Math.max(state.feed.length * 30, 30),
+      duration: stationDuration(),
       playbackRate: 1,
-      position: Math.min(state.index * 30, Math.max(state.feed.length * 30 - 1, 0)),
+      position: Math.min(audioPosition, Math.max(stationDuration() - 0.1, 0)),
     });
   } catch {
     /* Position state is optional and not supported by every Media Session implementation. */
@@ -430,7 +515,13 @@ function bindMediaSessionHandlers() {
     previoustrack: () => advanceTrack(-1),
     seekforward: () => advanceTrack(1),
     seekbackward: () => advanceTrack(-1),
-    seekto: () => advanceTrack(1),
+    seekto: (details) => {
+      if (typeof details.seekTime === "number") {
+        goToTrack(Math.floor(details.seekTime / STATION_TRACK_SECONDS));
+      } else {
+        advanceTrack(1);
+      }
+    },
   };
 
   Object.entries(actions).forEach(([action, handler]) => {

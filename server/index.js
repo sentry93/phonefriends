@@ -14,7 +14,9 @@ const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
 const POSTS_FILE = path.join(DATA_DIR, "posts.json");
 const MAX_BODY_BYTES = 14 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const SILENCE_WAV = createQuietWav();
+const STATION_TRACK_SECONDS = 10;
+const MAX_STATION_TRACKS = 100;
+const SILENCE_CACHE = new Map();
 
 function ensureStorage() {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -40,10 +42,10 @@ const mimeTypes = new Map([
   [".wav", "audio/wav"],
 ]);
 
-function createQuietWav() {
-  const sampleRate = 22050;
-  const seconds = 1;
-  const samples = sampleRate * seconds;
+function createQuietWav(seconds = 1) {
+  const sampleRate = 8000;
+  const safeSeconds = Math.max(1, Math.floor(seconds));
+  const samples = sampleRate * safeSeconds;
   const buffer = Buffer.alloc(44 + samples * 2);
 
   buffer.write("RIFF", 0);
@@ -66,6 +68,20 @@ function createQuietWav() {
   }
 
   return buffer;
+}
+
+function stationTrackCount(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.max(1, Math.min(MAX_STATION_TRACKS, Math.floor(parsed)));
+}
+
+function stationWav(trackCount) {
+  const count = stationTrackCount(trackCount);
+  if (!SILENCE_CACHE.has(count)) {
+    SILENCE_CACHE.set(count, createQuietWav(count * STATION_TRACK_SECONDS));
+  }
+  return SILENCE_CACHE.get(count);
 }
 
 function readPosts() {
@@ -327,17 +343,18 @@ async function route(req, res) {
   }
 
   if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/silence.wav") {
+    const stationAudio = stationWav(url.searchParams.get("tracks"));
     if (req.method === "HEAD") {
       res.writeHead(200, {
         "Content-Type": "audio/wav",
-        "Content-Length": SILENCE_WAV.length,
+        "Content-Length": stationAudio.length,
         "Cache-Control": "public, max-age=86400",
         "X-Content-Type-Options": "nosniff",
       });
       res.end();
       return;
     }
-    return sendBuffer(res, 200, SILENCE_WAV, "audio/wav");
+    return sendBuffer(res, 200, stationAudio, "audio/wav");
   }
 
   if (url.pathname === "/api/feed" && req.method === "GET") {
